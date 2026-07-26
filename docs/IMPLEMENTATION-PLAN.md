@@ -14,7 +14,7 @@ This is the engineering execution plan for the transport and runtime. Update the
 | 1 | Runtime shell + InMemoryTransport end-to-end | ✅ Done (Jul 26) | — |
 | 2 | Identity & TLS (Keychain, self-signed certs, verify policies, libp2p PeerID) | ✅ Done (Jul 26) | — |
 | 3 | QUICTransport over loopback (tier 2; S-3 resolved — see [spike-results](spike-results.md)) | ✅ Done (Jul 26); S-6 formal bench + real RFC 9221 datagrams pending | — |
-| 4 | Data plane completion + MPCCompat bridge | ✅ Done (Jul 26); remote-shutter validation in progress | — |
+| 4 | Data plane completion + MPCCompat bridge | ✅ Done (Jul 26); remote-shutter validated: all platforms build, 553 tests 0 failures, zero app-source changes | — |
 | 5 | Hardware spikes S-1/S-2/S-5 (AWDL) | ⬜ **Next requiring operator** | **two physical devices + operator** |
 | 6 | Release engineering: 0.1.0, docs, discoverability | ⬜ | license decision, Step 5 outcomes |
 
