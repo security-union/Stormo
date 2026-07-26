@@ -19,6 +19,24 @@ import PeerMesh
 ///   it for behavioral-parity testing during migration.
 /// - Delegate callbacks arrive on an internal serial queue, matching MCSession's
 ///   documented behavior.
+///
+/// ### Shared runtime (the MC three-object model)
+/// `MCSession` carries no service type — its advertiser and browser do. A
+/// `MultipeerSession` therefore *parks* on construction: it has no underlying
+/// ``PeerSession`` until a ``NearbyServiceAdvertiser`` or ``NearbyServiceBrowser``
+/// (constructed with the same `PeerID`) attaches it to their shared
+/// ``CompatCore``. Attachment happens exactly where MC associates a session with
+/// a connection: `NearbyServiceBrowser.invitePeer(_:to:...)` and the
+/// advertiser's `invitationHandler(true, session)`. The advertiser/browser's
+/// `serviceType` wins over the placeholder passed to this initializer.
+///
+/// ### Peer identity
+/// The bridge holds the app's `PeerID` (public-key hash + display name) but not
+/// its private key, so the underlying `PeerSession` uses a freshly derived
+/// key-identity. Remote peer IDs surfaced to the delegate (`didChange`,
+/// `didReceive`) carry *that* session's key hash — stable within a session and
+/// across the device's advertiser/browser, with the display name preserved, but
+/// not a value the app can precompute from a locally constructed `PeerID`.
 public final class MultipeerSession: @unchecked Sendable {
 
     public enum SendDataMode: Sendable {
@@ -45,24 +63,39 @@ public final class MultipeerSession: @unchecked Sendable {
 
     public weak var delegate: (any MultipeerSessionDelegate)?
 
-    public private(set) var myPeerID: PeerID
-    public private(set) var connectedPeers: [PeerID] = []
+    public let myPeerID: PeerID
 
     /// Emulate MCSession's 8-peer ceiling (off by default; FR-24).
     public var legacyPeerLimit = false
 
-    private let session: PeerSession
-    private let delegateQueue = DispatchQueue(label: "mpccompat.session.delegate")
+    /// Bonjour service type placeholder; superseded by the attaching
+    /// advertiser/browser's `serviceType` (MC carries no service on the session).
+    private let placeholderService: String
+    private let injectedTransport: (any PeerTransport)?
 
-    public init(peer name: String, service: String) {
-        let identity = (try? PeerIdentity.loadOrCreate(name: name)) ?? PeerIdentity(name: name)
-        self.myPeerID = identity.id
-        self.session = PeerSession(
-            identity: identity,
-            service: ServiceDescriptor(type: service)
-        )
-        // TODO(Phase 2): pump session.membership / session.messages /
-        // resource + stream events into delegate callbacks on delegateQueue.
+    private let stateLock = NSLock()
+    private var _connectedPeers: [PeerID] = []
+    private var _core: CompatCore?
+
+    /// Members currently connected to this session (mutated by the core on the
+    /// delegate queue; read-safe from any thread).
+    public var connectedPeers: [PeerID] {
+        stateLock.lock()
+        defer { stateLock.unlock() }
+        return _connectedPeers
+    }
+
+    /// Designated initializer (internal): all public inits funnel here.
+    init(myPeerID: PeerID, service: String, transport: (any PeerTransport)?) {
+        self.myPeerID = myPeerID
+        self.placeholderService = service
+        self.injectedTransport = transport
+    }
+
+    /// `MCSession(peer:)` analog taking a display name.
+    public convenience init(peer name: String, service: String) {
+        let id = (try? PeerIdentity.loadOrCreate(name: name))?.id ?? PeerIdentity(name: name).id
+        self.init(myPeerID: id, service: service, transport: nil)
     }
 
     /// `MCSession(peer:securityIdentity:encryptionPreference:)` analog.
@@ -72,28 +105,70 @@ public final class MultipeerSession: @unchecked Sendable {
     /// - `encryptionPreference` is accepted for source compatibility; traffic
     ///   is always encrypted regardless (FR-19).
     /// - MCSession carries no service type (its advertiser/browser do); the
-    ///   `service` default is a placeholder until Phase 2 unifies session and
-    ///   discovery wiring.
+    ///   `service` value is a placeholder until an advertiser/browser attaches.
     public convenience init(
         peer peerID: PeerID,
         securityIdentity: [Any]? = nil,
         encryptionPreference: EncryptionPreference = .required,
         service: String = "_peermesh._udp"
     ) {
-        self.init(peer: peerID.displayName, service: service)
-        // TODO(Phase 2): honor the caller-supplied PeerID as the session
-        // identity end-to-end (requires identity lookup by display name).
-        self.myPeerID = peerID
+        self.init(myPeerID: peerID, service: service, transport: nil)
+    }
+
+    /// Test entry point: inject a transport (e.g. `InMemoryTransport`) threaded
+    /// through the shared ``CompatCore`` to the underlying `PeerSession`.
+    convenience init(
+        peer peerID: PeerID,
+        service: String = "_peermesh._udp",
+        transport: any PeerTransport
+    ) {
+        self.init(myPeerID: peerID, service: service, transport: transport)
+    }
+
+    // MARK: Core binding
+
+    /// The shared core, once an advertiser/browser has attached this session.
+    var core: CompatCore? {
+        stateLock.lock()
+        defer { stateLock.unlock() }
+        return _core
+    }
+
+    /// Adopt this session as `core`'s delegate target. Called from
+    /// `browser.invitePeer(_:to:)` and the advertiser's `invitationHandler`.
+    func bind(to core: CompatCore) {
+        if placeholderService != core.serviceType {
+            // The advertiser/browser's serviceType wins (MC has none on session).
+            print("MPCCompat: MultipeerSession service '\(placeholderService)' "
+                + "superseded by discovery serviceType '\(core.serviceType)'.")
+        }
+        stateLock.lock()
+        _core = core
+        stateLock.unlock()
+        core.attachSession(self)
+    }
+
+    /// Update `connectedPeers` (called by the core on its serial delegate queue).
+    func setConnected(peer: PeerID, connected: Bool) {
+        stateLock.lock()
+        _connectedPeers.removeAll { $0 == peer }
+        if connected { _connectedPeers.append(peer) }
+        stateLock.unlock()
     }
 
     // MARK: MCSession-shaped API
 
+    /// Enqueue `data` for delivery (MCSession's `send` is synchronous).
+    ///
+    /// Mode mapping (DD-7): MCSession `.reliable` is guaranteed FIFO per pair →
+    /// `Delivery.reliableOrdered`; `.unreliable` → `Delivery.datagram`. Throws
+    /// only when this session is not attached to a running advertiser/browser
+    /// (no route exists); transient delivery failures surface on the delegate
+    /// path, as they do in MCSession.
     public func send(_ data: Data, toPeers peerIDs: [PeerID], with mode: SendDataMode) throws {
-        // TODO(Phase 2): bridge to session.send(_:to:delivery:). Mapping (DD-7):
-        // MCSession .reliable guaranteed FIFO per pair → Delivery.reliableOrdered;
-        // .unreliable → Delivery.datagram. (PeerMesh-native `.reliable` is
-        // unordered-across-messages and has no MCSession equivalent.)
-        throw PeerMeshError.unimplemented("MultipeerSession.send")
+        guard let core else { throw PeerMeshError.peerUnreachable(myPeerID) }
+        let delivery: Delivery = (mode == .reliable) ? .reliableOrdered : .datagram
+        core.send(data, to: peerIDs, delivery: delivery)
     }
 
     public func sendResource(
@@ -102,19 +177,26 @@ public final class MultipeerSession: @unchecked Sendable {
         toPeer peerID: PeerID,
         withCompletionHandler completionHandler: (@Sendable (Error?) -> Void)? = nil
     ) -> Progress? {
-        // TODO(Phase 2): bridge to session.sendResource(at:to:).
+        // TODO(merge): bridge to PeerSession.sendResource(at:to:) once the
+        // Step 4 data-plane exposes resource transfer + progress events. Absent
+        // in this worktree, so this remains unimplemented (see CompatCore pumps).
         completionHandler?(PeerMeshError.unimplemented("MultipeerSession.sendResource"))
         return nil
     }
 
     public func startStream(withName streamName: String, toPeer peerID: PeerID) throws -> OutputStream {
-        // TODO(Phase 2): NSStream bridge over PeerByteStream (design doc FR-24;
-        // modern callers should use PeerSession.openStream instead).
+        // TODO(merge): NSStream bridge over PeerByteStream once byte streams land
+        // (FR-18); modern callers should use PeerSession.openStream instead.
         throw PeerMeshError.unimplemented("MultipeerSession.startStream")
     }
 
     public func disconnect() {
-        // TODO(Phase 2): bridge to session.disconnect().
+        // MCSession reuse semantics: tear the PeerSession down; the next action
+        // through the shared core lazily rebuilds a fresh one (same identity).
+        core?.teardown()
+        stateLock.lock()
+        _connectedPeers.removeAll()
+        stateLock.unlock()
     }
 }
 
