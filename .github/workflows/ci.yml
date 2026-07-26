@@ -20,6 +20,21 @@ jobs:
       - uses: actions/checkout@v4
       - name: Run tests with coverage
         run: swift test --enable-code-coverage
+        env:
+          QUIC_DEBUG: "1"
+          QUIC_DEBUG_LOG: /tmp/quic-debug.log
+          # Same-machine runs need p2p off (failure mode 10). Peer-to-peer
+          # Wi-Fi coverage is tier 3 (hardware lab) by design.
+          PEERMESH_NO_P2P: "1"
+      - name: Diagnostics on failure (QUIC log + crash reports)
+        if: failure()
+        run: |
+          tail -200 /tmp/quic-debug.log 2>/dev/null || true
+          sleep 5 # ReportCrash writes .ips asynchronously
+          for f in ~/Library/Logs/DiagnosticReports/*.ips; do
+            [ -e "$f" ] || continue
+            echo "=== $f ==="; head -120 "$f"
+          done
       - name: Export coverage summary
         run: |
           BIN_PATH=$(swift build --show-bin-path)
@@ -70,10 +85,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Install pinned flatc
-        run: brew install flatbuffers # TODO: replace with `nix develop` once CI nix cache is set up
+        # Exact-version pin rule (CLAUDE.md): flatc MUST equal the FlatBuffers
+        # runtime pinned in Package.swift. brew would install latest and drift.
+        run: |
+          curl -fsSL -o /tmp/flatc.zip \
+            https://github.com/google/flatbuffers/releases/download/v25.2.10/Mac.flatc.binary.zip
+          unzip -o /tmp/flatc.zip -d /tmp/flatc-bin
+          /tmp/flatc-bin/flatc --version | grep -F '25.2.10'
       - name: Regenerate and diff
         run: |
-          flatc --swift -o /tmp/generated Schemas/*.fbs
+          /tmp/flatc-bin/flatc --swift -o /tmp/generated Schemas/*.fbs
           diff -r /tmp/generated Sources/PeerMeshProtocol/Generated \
             || { echo '::error::Generated sources drifted from schemas (DD-5 rule 4)'; exit 1; }
 
@@ -90,3 +111,23 @@ jobs:
       - uses: actions/checkout@v4
       - name: Run E2E script
         run: ./Scripts/e2e-cli.sh
+        env:
+          QUIC_DEBUG: "1"
+          # Same-machine host+joiner — see failure mode 10.
+          PEERMESH_NO_P2P: "1"
+      - name: Crash backtrace on failure (joiner under lldb)
+        if: failure()
+        env:
+          PEERMESH_NO_P2P: "1"
+        run: |
+          # The joiner SIGTRAPs dialing a Bonjour .service endpoint on runner
+          # VMs with no visible crash report; reproduce under lldb for a stack.
+          BIN="$(swift build --show-bin-path)/peermesh-cli"
+          "$BIN" host --name BTHost --service _pmbt1._udp --timeout 45 --once \
+            > /tmp/bt-host.log 2>&1 &
+          sleep 2
+          lldb -b -o run -o 'bt all' -o quit -- \
+            "$BIN" join --name BTJoin --service _pmbt1._udp \
+            --peer BTHost --send bt-ping 2>&1 | tail -100
+          echo "--- fault-level unified log ---"
+          log show --last 3m --predicate 'messageType == fault' --style compact 2>/dev/null | tail -30 || true

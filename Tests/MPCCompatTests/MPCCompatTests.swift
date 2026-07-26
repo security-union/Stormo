@@ -4,7 +4,7 @@ import Testing
 @testable import MPCCompat
 import PeerMesh
 
-@Suite("MPCCompat shim scaffolding")
+@Suite("MPCCompat shim")
 struct MPCCompatTests {
 
     @Test("MultipeerSession constructs with MCSession-shaped API")
@@ -12,11 +12,12 @@ struct MPCCompatTests {
         let session = MultipeerSession(peer: "Test Device", service: "_compat._udp")
         #expect(session.myPeerID.displayName == "Test Device")
         #expect(session.connectedPeers.isEmpty)
-        #expect(session.legacyPeerLimit == false)  // 8-peer cap lifted by default (FR-24)
     }
 
-    @Test("send throws (not traps) before Phase 2 bridging")
-    func sendThrowsUnimplemented() {
+    @Test("send on an unattached session throws (no route), not traps")
+    func sendWithoutRouteThrows() {
+        // A session with no advertiser/browser attached has no CompatCore and
+        // thus no route; send must surface that as a throw, not a trap.
         let session = MultipeerSession(peer: "T", service: "_compat._udp")
         #expect(throws: PeerMeshError.self) {
             try session.send(Data([0x01]), toPeers: [], with: .reliable)

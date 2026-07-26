@@ -95,11 +95,12 @@ public final class QUICTransport: PeerTransport, @unchecked Sendable {
     /// `false` — QUIC tests should skip cleanly and hosts should inject a
     /// `SecIdentity` via ``Configuration/tlsProvider``.
     /// Peer-to-peer Wi-Fi opt-out (`PEERMESH_NO_P2P=1`): same-machine
-    /// self-dials fail with `includePeerToPeer` enabled (docs/spike-results.md),
-    /// so entitled in-process E2E tests disable it. Read dynamically — tests
-    /// may `setenv` before starting services.
+    /// self-dials fail with `includePeerToPeer` enabled
+    /// (docs/spike-results.md), so same-machine test runs disable it.
+    /// `getenv`, not `ProcessInfo`: the latter caches the environment at
+    /// first access, which silently ignores a test's later `setenv`.
     static var peerToPeerEnabled: Bool {
-        ProcessInfo.processInfo.environment["PEERMESH_NO_P2P"] == nil
+        getenv("PEERMESH_NO_P2P") == nil
     }
 
     /// Bonjour registration types are `_name._tcp|_udp` with a 1–15 char name.
@@ -363,8 +364,19 @@ public final class QUICTransport: PeerTransport, @unchecked Sendable {
         let localIdentity = try makeLocalIdentity(for: identity)
         let isBonjour: Bool
         if case .bonjour = configuration.discovery { isBonjour = true } else { isBonjour = false }
+
+        // Failure mode 12: pre-26 OSes trap when NWMultiplexGroup is handed a
+        // `.service` endpoint — resolve it to the concrete hostPort first.
+        // 26+ dials the service endpoint directly (the hardware-validated path).
+        var dialEndpoint = endpoint
+        if case .service = endpoint, #unavailable(macOS 26, iOS 26, macCatalyst 26) {
+            dialEndpoint = try await quicResolveServiceEndpoint(
+                endpoint,
+                includePeerToPeer: isBonjour && Self.peerToPeerEnabled,
+                queue: queue)
+        }
         return try await QUICConnection.dial(
-            to: endpoint,
+            to: dialEndpoint,
             localPeer: identity.id,
             remote: peer.id,
             localIdentity: localIdentity,
@@ -486,8 +498,11 @@ extension Data {
 
 #else
 
-/// Fallback for platforms without Network/Security: the QUIC driver is
-/// unavailable; `PeerSession` must be constructed with an explicit transport.
+/// Fallback for platforms without Network.framework/Security (e.g. Linux): the
+/// QUIC driver cannot exist, so every network operation throws
+/// `.unimplemented`. This is a hard platform floor, not a TODO — a `PeerSession`
+/// on such a platform must be constructed with an explicit non-QUIC transport
+/// (e.g. `InMemoryTransport`).
 public struct QUICTransport: PeerTransport {
     public let inboundConnections: AsyncStream<any PeerConnection> = AsyncStream { _ in }
     public init() {}

@@ -18,7 +18,8 @@ import Network
 ///   byte stream rides its own stream (tagged `0x01`): a length-prefixed
 ///   `StreamHeader` (DD-7) then payload to FIN.
 ///
-/// `NWConnectionGroup.extract()` opens outbound streams; `newConnectionHandler`
+/// `NWConnection(from:)` opens outbound streams (`extract()` is only the
+/// macOS 12 fallback — see ``openGroupStream()``); `newConnectionHandler`
 /// surfaces inbound ones.
 final class QUICConnection: PeerConnection, @unchecked Sendable {
     /// Fired once on terminal close (before streams finish); used by `accept`
@@ -120,9 +121,7 @@ final class QUICConnection: PeerConnection, @unchecked Sendable {
         quicDebug("dial: control ready")
 
         // Authenticated key hash from the TLS handshake (FR-22).
-        quicDebug("dial: extracting peer cert")
         let der = quicPeerCertificateDER(control)
-        quicDebug("dial: cert bytes=\(der?.count ?? -1)")
         if let der, let keyHash = TrustEvaluator.keyHash(fromCertificateDER: der) {
             guard keyHash == remote.keyHash else { throw QUICError.identityMismatch }
             connection.remoteKeyHashBox.value = keyHash
@@ -319,7 +318,7 @@ final class QUICConnection: PeerConnection, @unchecked Sendable {
                 quicDebug("dedicated: chunk \(chunk.count)B complete=\(isComplete)")
                 if isComplete { break }
             }
-quicDebug("dedicated: yielding data \(payload.count)B")
+            quicDebug("dedicated: yielding data \(payload.count)B")
             eventsContinuation.yield(.data(payload, delivery, sequence: sequence))
 
         case .transferChunk, .appStream:
@@ -390,10 +389,10 @@ quicDebug("dedicated: yielding data \(payload.count)B")
     /// payload.
     private func openDedicatedStream(header: StreamHeaderInfo) async throws -> NWConnection {
         guard let stream = openGroupStream() else {
-            quicDebug("openDedicated: extract() returned nil (kind=\(header.kind))")
+            quicDebug("openDedicated: openGroupStream returned nil (kind=\(header.kind))")
             throw QUICError.connectionClosed
         }
-        quicDebug("openDedicated: extracted, awaiting ready (kind=\(header.kind))")
+        quicDebug("openDedicated: opened, awaiting ready (kind=\(header.kind))")
         try await quicAwaitReady(stream, queue: queue)
         quicDebug("openDedicated: ready")
         let headerBytes = QUICStreamHeaderCodec.encode(header)
@@ -441,19 +440,6 @@ private actor ControlWriter {
         out.append(QUICFraming.lengthPrefix(frame.count))
         out.append(frame)
         try await quicSend(connection, out)
-    }
-}
-
-// MARK: - Locked compare-and-set helper
-
-extension Locked where T == Bool {
-    /// Atomically set to `new` iff currently `expected`; returns whether it changed.
-    func compareAndSet(expected: Bool, new: Bool) -> Bool {
-        withLock { current in
-            guard current == expected else { return false }
-            current = new
-            return true
-        }
     }
 }
 

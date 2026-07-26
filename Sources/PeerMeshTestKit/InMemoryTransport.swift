@@ -347,18 +347,3 @@ final class ReorderingConnection: PeerConnection, @unchecked Sendable {
 
     func close() async { await base.close() }
 }
-
-/// Minimal lock box for transport-internal state.
-final class Locked<T>: @unchecked Sendable {
-    private let lock = NSLock()
-    private var stored: T
-
-    init(_ value: T) {
-        self.stored = value
-    }
-
-    var value: T {
-        get { lock.withLock { stored } }
-        set { lock.withLock { stored = newValue } }
-    }
-}

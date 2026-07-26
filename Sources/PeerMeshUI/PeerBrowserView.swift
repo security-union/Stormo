@@ -5,6 +5,10 @@ import SwiftUI
 /// SwiftUI replacement for `MCBrowserViewController` (FR-23): lists discovered
 /// peers and lets the user invite them. Fully restyleable; built solely on
 /// public PeerMesh APIs.
+///
+/// - Warning: Experimental preview — the API is unstable and this view is a
+///   minimal skeleton. TODO(ui-completion): invite action with progress/error
+///   states, empty-state, and permission-denied (FR-4) presentation.
 public struct PeerBrowserView: View {
     private let session: PeerSession
     @State private var peers: [DiscoveredPeer] = []
@@ -14,9 +18,6 @@ public struct PeerBrowserView: View {
     }
 
     public var body: some View {
-        // TODO(Phase 2): live list driven by session.discoveries, invite
-        // action with progress/error states, empty-state and permission-denied
-        // (FR-4) presentations.
         List(peers, id: \.id) { peer in
             Text(peer.id.displayName)
         }
@@ -37,6 +38,10 @@ public struct PeerBrowserView: View {
 /// SwiftUI replacement for `MCAdvertiserAssistant`'s consent UI (FR-23): a
 /// sheet presenting an incoming invitation for the user to accept or decline —
 /// the authorization step of `.automatic` trust (FR-21, DD-2).
+///
+/// - Warning: Experimental preview — the API is unstable and this view is a
+///   minimal skeleton. TODO(ui-completion): inviter name, key-continuity badge,
+///   and context-preview hook.
 public struct InvitationConsentSheet: View {
     private let invitation: Invitation
 
@@ -45,8 +50,6 @@ public struct InvitationConsentSheet: View {
     }
 
     public var body: some View {
-        // TODO(Phase 2): full consent UI (inviter name, key-continuity badge,
-        // context preview hook).
         VStack(spacing: 16) {
             Text("“\(invitation.from.displayName)” wants to connect")
                 .font(.headline)

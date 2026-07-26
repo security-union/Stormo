@@ -53,5 +53,5 @@ transport — no current Apple API offers one (MPC's has been gone ~10 years).
 ## Status
 
 Pre-release. Core protocol, QUIC transport, and MPCCompat are functional and
-hardware-validated; API may still change before 1.0. License: MIT (final
-selection before first tagged release).
+hardware-validated; API may still change before 1.0. License: MIT (see
+[LICENSE](LICENSE)).

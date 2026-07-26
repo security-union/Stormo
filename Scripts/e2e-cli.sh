@@ -12,14 +12,17 @@ LOGDIR="$(mktemp -d)"
 trap 'kill $HOST_PID 2>/dev/null || true; rm -rf "$LOGDIR"' EXIT
 
 swift build > /dev/null
-BIN="$(swift build --show-bin-path)/peermesh"
+BIN="$(swift build --show-bin-path)/peermesh-cli"
+
+# GNU timeout is absent on stock macOS (incl. GitHub runners); perl is not.
+with_timeout() { perl -e 'alarm shift; exec @ARGV' "$@"; }
 
 "$BIN" host --name E2EHost --service "$SERVICE" --timeout 60 --once \
     > "$LOGDIR/host.log" 2>&1 &
 HOST_PID=$!
 sleep 2
 
-if ! timeout 45 "$BIN" join --name E2EJoin --service "$SERVICE" \
+if ! with_timeout 45 "$BIN" join --name E2EJoin --service "$SERVICE" \
     --peer E2EHost --send "e2e-ping" > "$LOGDIR/join.log" 2>&1; then
   echo "FAIL: joiner did not complete"; cat "$LOGDIR/join.log" "$LOGDIR/host.log"; exit 1
 fi

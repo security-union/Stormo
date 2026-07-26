@@ -105,8 +105,12 @@ public struct ProtocolEngine: Sendable {
     public private(set) var members: Set<PeerID> = []
 
     private var connections: Set<PeerID> = []
-    private var pendingOutgoing: [PeerID: Data?] = [:]   // peer -> invite context
-    private var pendingTimeouts: [PeerID: TimeInterval] = [:]
+    // Peer -> invite context, for invitations WE initiated. Entry lifecycle: added
+    // on `.invite` (with the invitation timer), sent on `connectionEstablished`,
+    // and removed on exactly one terminal outcome — accepted/declined response,
+    // timeout, connection loss, or `.leave`. Its presence is the "invite in
+    // flight" flag the whole invitation state machine keys off.
+    private var pendingOutgoing: [PeerID: Data?] = [:]
     // Zero-copy (DD-5/DD-6): retain the verified Signal (≤64 KB buffer) rather
     // than copying fields out of it.
     private var pendingIncoming: [PeerID: Signal] = [:]
@@ -146,7 +150,6 @@ public struct ProtocolEngine: Sendable {
             connections.remove(peer)
             var effects: [Effect] = []
             if pendingOutgoing.removeValue(forKey: peer) != nil {
-                pendingTimeouts.removeValue(forKey: peer)
                 effects.append(.cancelTimer(.invitation(peer)))
                 effects.append(.emit(.invitationFailed(peer, reason: .connectionLost)))
             }
@@ -167,7 +170,6 @@ public struct ProtocolEngine: Sendable {
 
         case .timerFired(.invitation(let peer)):
             guard pendingOutgoing.removeValue(forKey: peer) != nil else { return [] }
-            pendingTimeouts.removeValue(forKey: peer)
             return [
                 .emit(.invitationFailed(peer, reason: .timedOut)),
                 .closeConnection(peer),  // FR-9: half-open state cleanup
@@ -192,7 +194,6 @@ public struct ProtocolEngine: Sendable {
             guard !members.contains(peer), pendingOutgoing[peer] == nil else { return [] }
             pendingOutgoing[peer] = context
             let duration = timeout ?? configuration.invitationTimeout
-            pendingTimeouts[peer] = duration
             // The timer arms HERE — covering the dial as well as the
             // handshake — so a transport that hangs (radio limbo, filtered
             // UDP) surfaces as a timed-out invitation, never an infinite wait.
@@ -222,8 +223,9 @@ public struct ProtocolEngine: Sendable {
                 .emit(.peerJoined(peer)),
                 .startTimer(.keepAlive(peer), duration: configuration.keepAliveInterval),
             ]
-            // Gossip the new member to the rest of the mesh (FR-13).
-            // TODO(Phase 1): epoch management beyond a single counter.
+            // Gossip the new member to the rest of the mesh (FR-13). Epoch is a
+            // monotonic member count for now — sufficient for single-inviter
+            // growth; concurrent-admission epoch reconciliation is future work.
             for member in members where member != peer {
                 effects.append(.sendSignal(
                     .rosterUpdate(members: roster, epoch: UInt64(roster.count)), to: member))
@@ -246,7 +248,6 @@ public struct ProtocolEngine: Sendable {
             members.removeAll()
             connections.removeAll()
             pendingOutgoing.removeAll()
-            pendingTimeouts.removeAll()
             pendingIncoming.removeAll()
             return open
                 .sorted { $0.keyHash.lexicographicallyPrecedes($1.keyHash) }
@@ -269,7 +270,6 @@ public struct ProtocolEngine: Sendable {
 
         case .inviteResponse(let response):
             guard pendingOutgoing.removeValue(forKey: peer) != nil else { return [] }
-            pendingTimeouts.removeValue(forKey: peer)
             var effects: [Effect] = [.cancelTimer(.invitation(peer))]
             guard response.accepted else {
                 effects.append(.emit(.invitationFailed(peer, reason: .declined)))
@@ -280,8 +280,9 @@ public struct ProtocolEngine: Sendable {
             effects.append(.emit(.peerJoined(peer)))
             effects.append(.startTimer(.keepAlive(peer), duration: configuration.keepAliveInterval))
             // Dial roster members we don't know yet, tie-break deciding
-            // direction (FR-12). TODO(Phase 1): those dials carry a session
-            // join handshake, not a fresh invitation.
+            // direction (FR-12).
+            // TODO(mesh-join): these dials should carry a session-join handshake,
+            // not a fresh invitation (see also the .connect executor note).
             for index in 0..<response.rosterCount {
                 guard let member = response.roster(at: index)?.peerID else { continue }
                 if member != localPeer, !members.contains(member),
@@ -309,7 +310,7 @@ public struct ProtocolEngine: Sendable {
             return []
 
         case .codeConfirm:
-            // TODO(Phase 2): `.pairingCode` transcript verification (DD-2, S-4).
+            // TODO(pairing-code): `.pairingCode` transcript verification (DD-2, S-4).
             return []
 
         case .transferOffer(let offer):

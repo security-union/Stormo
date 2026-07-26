@@ -23,7 +23,10 @@ let package = Package(
         .library(name: "PeerMeshTestKit", targets: ["PeerMeshTestKit"]),
         // Diagnostic CLI: advertise/browse/chat between real processes over
         // Bonjour + QUIC (the production discovery path).
-        .executable(name: "peermesh", targets: ["PeerMeshCLI"]),
+        // Named "peermesh-cli", not "peermesh": a product differing from the
+        // PeerMesh library only by case collides on case-insensitive APFS when
+        // xcodebuild materializes package products as modules.
+        .executable(name: "peermesh-cli", targets: ["PeerMeshCLI"]),
     ],
     dependencies: [
         // Signaling plane serialization (DD-5). Pinned EXACTLY to match the
@@ -67,7 +70,7 @@ let package = Package(
             name: "PeerMeshTests",
             dependencies: ["PeerMesh", "PeerMeshTestKit"]
         ),
-        .testTarget(name: "MPCCompatTests", dependencies: ["MPCCompat"]),
+        .testTarget(name: "MPCCompatTests", dependencies: ["MPCCompat", "PeerMeshTestKit"]),
     ],
     swiftLanguageModes: [.v6]
 )

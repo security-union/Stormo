@@ -13,9 +13,11 @@
       devShells = forAllSystems (pkgs: {
         default = pkgs.mkShell {
           packages = [
-            # Signaling codegen — version pinned via flake.lock (DD-5 rule 4).
-            # Regenerate with:
-            #   flatc --swift -o Sources/PeerMesh/Signaling/Generated Schemas/signal.fbs
+            # Signaling codegen (DD-5 rule 4). This flatc's version MUST equal the
+            # `google/flatbuffers` runtime pinned `exact:` in Package.swift — the
+            # generated code and the runtime that reads it are one unit; bump both
+            # together. Regenerate the committed sources with:
+            #   flatc --swift -o Sources/PeerMeshProtocol/Generated Schemas/*.fbs
             pkgs.flatbuffers
           ];
         };
