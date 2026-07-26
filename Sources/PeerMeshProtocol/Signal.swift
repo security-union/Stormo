@@ -184,6 +184,16 @@ extension WirePeerInfo {
     }
 }
 
+extension WireTransferOffer {
+    /// Reads the 16-byte `transfer_id` vector back into a `UUID` (FR-17). The
+    /// runtime uses it to pair the offer with its `transferChunk` stream.
+    public var transferID: UUID? {
+        guard transferIdCount == 16 else { return nil }
+        let bytes = transferId
+        return bytes.withUnsafeBytes { UUID(uuid: $0.loadUnaligned(as: uuid_t.self)) }
+    }
+}
+
 // Data-plane stream header (DD-7). Every non-control QUIC stream starts with
 // a size-prefixed StreamHeader; FIN delimits the payload.
 public typealias WireStreamHeader = PeerMesh_Wire_StreamHeader
@@ -220,4 +230,10 @@ public enum PeerMeshError: Error, Sendable, Equatable {
     case peerUnreachable(PeerID)
     /// Inbound signaling failed FlatBuffers verification (DD-5 rule 3).
     case malformedSignal
+    /// A resource transfer ended before all announced bytes arrived — sender
+    /// cancellation or connection loss (FR-17). The partial temp file is discarded.
+    case resourceTransferIncomplete
+    /// A per-peer ordered-message reorder buffer exceeded its cap; the peer is
+    /// reordering beyond what a reliable transport can justify (DD-7).
+    case reorderBufferOverflow
 }

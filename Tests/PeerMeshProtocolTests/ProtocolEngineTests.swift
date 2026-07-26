@@ -126,6 +126,36 @@ struct ProtocolEngineTests {
         #expect(ProtocolEngine.shouldDial(from: alice, to: bob))
         #expect(!ProtocolEngine.shouldDial(from: bob, to: alice))
     }
+
+    @Test("TransferOffer from a member emits transferOffered (FR-17)")
+    func transferOfferFromMember() {
+        var engine = ProtocolEngine(localPeer: alice)
+        engine.admit(bob)
+        let id = UUID()
+        let effects = engine.handle(
+            .signal(.transferOffer(id: id, name: "photo.jpg", totalBytes: 2_048), from: bob))
+        #expect(effects == [
+            .emit(.transferOffered(id: id, name: "photo.jpg", totalBytes: 2_048, from: bob))
+        ])
+    }
+
+    @Test("TransferOffer / StreamOpen from a non-member are ignored (membership gate)")
+    func announcementsFromNonMembersIgnored() {
+        var engine = ProtocolEngine(localPeer: alice)
+        // Bob never admitted.
+        #expect(engine.handle(
+            .signal(.transferOffer(id: UUID(), name: "x", totalBytes: 1), from: bob)).isEmpty)
+        #expect(engine.handle(
+            .signal(.streamOpen(label: "telemetry"), from: bob)).isEmpty)
+    }
+
+    @Test("StreamOpen from a member emits streamOpened (FR-18)")
+    func streamOpenFromMember() {
+        var engine = ProtocolEngine(localPeer: alice)
+        engine.admit(bob)
+        let effects = engine.handle(.signal(.streamOpen(label: "telemetry"), from: bob))
+        #expect(effects == [.emit(.streamOpened(label: "telemetry", from: bob))])
+    }
 }
 
 // MARK: - Test-only conveniences
