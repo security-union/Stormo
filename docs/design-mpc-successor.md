@@ -177,7 +177,7 @@ All event delivery via `AsyncSequence`; all operations `async` with cancellation
 
 ### DD-5: Disciplined FlatBuffers for the signaling plane — **adopted**
 
-All control-plane messages (invitation, accept/decline, roster gossip, keepalive, topology election, version negotiation, transfer/stream announcements) are FlatBuffers, generated from `.fbs` schemas that are the single source of truth in the repository. Application payloads (FR-15..FR-18) remain opaque bytes — apps serialize however they like; FlatBuffers governs only PeerMesh's own protocol.
+All control-plane messages (identity bootstrap/PeerHello, invitation, accept/decline, roster gossip, keepalive, topology election, version negotiation, transfer/stream announcements) are FlatBuffers, generated from `.fbs` schemas that are the single source of truth in the repository. Application payloads (FR-15..FR-18) remain opaque bytes — apps serialize however they like; FlatBuffers governs only PeerMesh's own protocol.
 
 **Rationale:** zero-copy access suits a hot control path on many concurrent connections; the schema compiler enforces cross-version wire compatibility mechanically (vs. convention-only discipline in CBOR/JSON); the built-in **verifier** gives structural validation of bytes received from *not-yet-authenticated* peers during the handshake — a security property the signaling path specifically needs; official Swift support ships via SPM (`google/flatbuffers`, `flatc --swift`).
 

@@ -1,0 +1,24 @@
+// PeerMesh transport-level identity bootstrap (PeerHello).
+//
+// The first frame in each direction on the control stream, sent immediately
+// after the QUIC/mTLS handshake. TLS authenticates the peer's KEY; PeerHello
+// carries the full PeerID (key hash + cosmetic display name), and the key
+// hash is cross-checked against the TLS-authenticated certificate.
+//
+// Same evolution discipline as signal.fbs (DD-5): append-only field ids,
+// verifier + caps on every inbound read.
+//
+// Codegen (flatc version pinned in flake.nix, matched exactly by Package.swift):
+//   flatc --swift -o Sources/PeerMeshProtocol/Generated Schemas/*.fbs
+
+include "signal.fbs";
+
+namespace PeerMesh.Wire;
+
+table PeerHello {
+  /// The sender's identity. key_hash must match the TLS certificate's key
+  /// hash — divergence is identityMismatch and kills the connection.
+  peer:PeerInfo (id: 0);
+}
+
+root_type PeerHello;
