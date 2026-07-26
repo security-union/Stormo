@@ -1,0 +1,81 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Test strategy (design doc DD-6):
+#   Tier 1 (engine, sans-I/O) + Tier 2 (loopback QUIC integration) run here on
+#   every commit, on every Apple target we ship. Tier 3 (AWDL/peer-to-peer
+#   Wi-Fi hardware matrix) is a release gate on the physical device lab and is
+#   NOT represented in this workflow.
+
+jobs:
+  # Fast loop: native macOS via SwiftPM, with coverage (QA-8 ≥ 85% non-radio).
+  macos-native:
+    name: macOS (swift test + coverage)
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run tests with coverage
+        run: swift test --enable-code-coverage
+      - name: Export coverage summary
+        run: |
+          BIN_PATH=$(swift build --show-bin-path)
+          PROF="$BIN_PATH/codecov/default.profdata"
+          XCTEST=$(find "$BIN_PATH" -name '*.xctest' | head -1)
+          xcrun llvm-cov report "$XCTEST/Contents/MacOS/$(basename "$XCTEST" .xctest)" \
+            -instr-profile "$PROF" -ignore-filename-regex '(Tests|Generated)/' || true
+
+  # Same test bundles executed per Apple destination (the swift-nio / TCA /
+  # Apple-packages pattern): one suite, N platforms.
+  platform-matrix:
+    name: ${{ matrix.name }}
+    runs-on: macos-15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: iOS Simulator
+            destination: auto-ios # resolved at runtime against the runner's simulators
+          - name: Mac Catalyst
+            destination: platform=macOS,variant=Mac Catalyst
+    steps:
+      - uses: actions/checkout@v4
+      - name: Resolve destination
+        id: dest
+        run: |
+          if [ "${{ matrix.destination }}" = "auto-ios" ]; then
+            # Pick the first available iPhone simulator on this runner image —
+            # resilient to Xcode image updates renaming devices.
+            UDID=$(xcrun simctl list devices available --json \
+              | jq -r '[.devices[] | .[] | select(.name | startswith("iPhone"))][0].udid')
+            echo "destination=platform=iOS Simulator,id=$UDID" >> "$GITHUB_OUTPUT"
+          else
+            echo "destination=${{ matrix.destination }}" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Test
+        run: |
+          set -o pipefail
+          xcodebuild test \
+            -scheme PeerMesh-Package \
+            -destination '${{ steps.dest.outputs.destination }}' \
+            | grep -vE '^\s*$' | tail -50
+
+  # DD-5 rule 4: committed generated code must match the pinned flatc output.
+  flatbuffers-drift:
+    name: FlatBuffers codegen drift
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install pinned flatc
+        run: brew install flatbuffers # TODO: replace with `nix develop` once CI nix cache is set up
+      - name: Regenerate and diff
+        run: |
+          flatc --swift -o /tmp/generated Schemas/*.fbs
+          diff -r /tmp/generated Sources/PeerMeshProtocol/Generated \
+            || { echo '::error::Generated sources drifted from schemas (DD-5 rule 4)'; exit 1; }
+
+# TODO(S-6): nightly workflow_dispatch job — stream-churn benchmark and 32-peer
+# mesh simulation with timing budgets (QA-2, QA-8).

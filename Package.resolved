@@ -1,0 +1,15 @@
+{
+  "originHash" : "2ed6f825d8eb495ae4b5a058ce34a01972eadfea750ff0678f385b6df748747e",
+  "pins" : [
+    {
+      "identity" : "flatbuffers",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/google/flatbuffers.git",
+      "state" : {
+        "revision" : "1c514626e83c20fffa8557e75641848e1e15cd5e",
+        "version" : "25.2.10"
+      }
+    }
+  ],
+  "version" : 3
+}

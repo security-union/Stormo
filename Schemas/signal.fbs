@@ -1,0 +1,89 @@
+// PeerMesh signaling schema (DD-5: disciplined FlatBuffers).
+//
+// DISCIPLINE (normative — see design doc DD-5; enforced by CI):
+//   * Field ids are append-only. Never renumber, retype, or remove a field —
+//     mark it (deprecated) instead.
+//   * No new `required` fields after protocol_version 1 ships.
+//   * Enum/union values are append-only; 0 is always NONE/UNKNOWN.
+//   * Schema changes must pass `flatc --conform` against the previously
+//     released schema.
+//   * All inbound buffers are read via the verifier with hard caps
+//     (64 KB control-message size) — see SignalCodec.
+//
+// Codegen (flatc version pinned in flake.nix):
+//   flatc --swift -o Sources/PeerMesh/Signaling/Generated Schemas/signal.fbs
+
+namespace PeerMesh.Wire;
+
+/// A session member, as carried in rosters (FR-13).
+table PeerInfo {
+  /// SHA-256 of the peer's P-256 public key (FR-20). 32 bytes.
+  key_hash:[ubyte] (id: 0);
+  display_name:string (id: 1);
+}
+
+/// Invitation to join a session (FR-6). First message on the control stream
+/// after the QUIC handshake (encrypted, not yet authorized).
+table Invite {
+  inviter:PeerInfo (id: 0);
+  /// Opaque application context (FR-6). Capped by SignalCodec's control-message
+  /// limit; larger contexts are chunked (DD-5 rule 3).
+  context:[ubyte] (id: 1);
+}
+
+/// Response to an Invite (FR-7).
+table InviteResponse {
+  accepted:bool (id: 0);
+  /// Current session roster, sent on acceptance so the joiner converges within
+  /// one round-trip (FR-13).
+  roster:[PeerInfo] (id: 1);
+}
+
+/// Pairing-code transcript confirmation (DD-2, `.pairingCode` mode only).
+table CodeConfirm {
+  /// MAC over the TLS exporter-bound transcript covering both certificates (S-4).
+  transcript_mac:[ubyte] (id: 0);
+}
+
+/// Membership gossip (FR-13, FR-14).
+table RosterUpdate {
+  members:[PeerInfo] (id: 0);
+  /// Monotonic epoch for last-writer-wins convergence.
+  epoch:ulong (id: 1);
+}
+
+/// Liveness probe; also carries the peer's send-timestamp for RTT estimation.
+table KeepAlive {
+  timestamp_ms:ulong (id: 0);
+}
+
+/// Announces an incoming resource transfer on a dedicated stream (FR-17).
+table TransferOffer {
+  transfer_id:[ubyte] (id: 0);   // UUID, 16 bytes
+  name:string (id: 1);
+  total_bytes:ulong (id: 2);
+}
+
+/// Announces an application byte stream opening on a dedicated stream (FR-18).
+table StreamOpen {
+  label:string (id: 0);
+}
+
+union SignalBody {
+  Invite,
+  InviteResponse,
+  CodeConfirm,
+  RosterUpdate,
+  KeepAlive,
+  TransferOffer,
+  StreamOpen,
+}
+
+/// Envelope for every control-plane message (DD-5 rule 1). Size-prefixed on
+/// the wire. Unknown body variants are ignored-and-logged, never fatal (QA-11).
+table Signal {
+  protocol_version:ushort (id: 0);
+  body:SignalBody (id: 2);  // id 1 is the implicit body_type field
+}
+
+root_type Signal;

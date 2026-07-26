@@ -1,0 +1,39 @@
+// PeerMesh data-plane stream header (DD-7: stream-per-message, MoQ-inspired).
+//
+// Every non-control QUIC stream begins with a size-prefixed StreamHeader,
+// followed by raw payload bytes; stream FIN delimits the payload. The control
+// stream (stream 0) carries Signal messages instead (signal.fbs) because
+// signaling requires total order.
+//
+// Same evolution discipline as signal.fbs (DD-5): append-only field ids,
+// append-only enum values, verifier + caps on every inbound read.
+//
+// Codegen (flatc version pinned in flake.nix, matched exactly by Package.swift):
+//   flatc --swift -o Sources/PeerMeshProtocol/Generated Schemas/stream_header.fbs
+
+namespace PeerMesh.Wire;
+
+enum StreamKind: ubyte {
+  Unknown = 0,
+  /// Reliable message, unordered across messages (FR-15 `.reliable`).
+  Message = 1,
+  /// Reliable message with FIFO ordering via `sequence` (FR-15 `.reliableOrdered`).
+  OrderedMessage = 2,
+  /// Resource-transfer chunk stream (FR-17); `transfer_id` pairs it with the
+  /// TransferOffer signal sent on the control stream.
+  TransferChunk = 3,
+  /// Application-opened named byte stream (FR-18).
+  AppStream = 4,
+}
+
+table StreamHeader {
+  kind:StreamKind (id: 0);
+  /// Sender-local FIFO sequence, per peer pair. Meaningful for OrderedMessage.
+  sequence:ulong (id: 1);
+  /// UUID (16 bytes). Meaningful for TransferChunk.
+  transfer_id:[ubyte] (id: 2);
+  /// Stream label. Meaningful for AppStream.
+  label:string (id: 3);
+}
+
+root_type StreamHeader;

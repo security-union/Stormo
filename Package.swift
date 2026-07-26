@@ -1,0 +1,55 @@
+// swift-tools-version: 6.0
+import PackageDescription
+
+let package = Package(
+    name: "PeerMesh",
+    platforms: [
+        .iOS(.v15),
+        .macOS(.v12),
+        .tvOS(.v15),
+        .visionOS(.v1),
+    ],
+    products: [
+        // Sans-I/O protocol engine: deterministic state machine + signal model,
+        // fully testable without any transport (DD-6).
+        .library(name: "PeerMeshProtocol", targets: ["PeerMeshProtocol"]),
+        // Modern core: discovery, sessions, messaging, streams, resources over QUIC (DD-1).
+        .library(name: "PeerMesh", targets: ["PeerMesh"]),
+        // Near-drop-in migration surface for MultipeerConnectivity codebases (FR-24).
+        .library(name: "MPCCompat", targets: ["MPCCompat"]),
+        // SwiftUI peer picker and invitation consent components (FR-23).
+        .library(name: "PeerMeshUI", targets: ["PeerMeshUI"]),
+        // In-memory transport and mesh simulation for CI without radios (QA-8).
+        .library(name: "PeerMeshTestKit", targets: ["PeerMeshTestKit"]),
+    ],
+    dependencies: [
+        // Signaling plane serialization (DD-5). Pinned EXACTLY to match the
+        // flatc in flake.nix — generated code and runtime must be the same
+        // version (25.12.x split out a `Common` module the 25.2.10 codegen
+        // doesn't import). Bump both together (DD-5 rule 4).
+        .package(url: "https://github.com/google/flatbuffers.git", exact: "25.2.10"),
+    ],
+    targets: [
+        // Sans-I/O (DD-6): the ONLY dependency is FlatBuffers (pure CPU).
+        // No Network.framework, no clocks, no async — keep it that way.
+        .target(
+            name: "PeerMeshProtocol",
+            dependencies: [
+                .product(name: "FlatBuffers", package: "flatbuffers")
+            ]
+        ),
+        // Runtime shell: executes engine Effects against real transports.
+        .target(name: "PeerMesh", dependencies: ["PeerMeshProtocol"]),
+        .target(name: "MPCCompat", dependencies: ["PeerMesh"]),
+        .target(name: "PeerMeshUI", dependencies: ["PeerMesh"]),
+        .target(name: "PeerMeshTestKit", dependencies: ["PeerMesh"]),
+        // Tier 1 (DD-6): engine tests — no transport, no radios, deterministic.
+        .testTarget(name: "PeerMeshProtocolTests", dependencies: ["PeerMeshProtocol"]),
+        .testTarget(
+            name: "PeerMeshTests",
+            dependencies: ["PeerMesh", "PeerMeshTestKit"]
+        ),
+        .testTarget(name: "MPCCompatTests", dependencies: ["MPCCompat"]),
+    ],
+    swiftLanguageModes: [.v6]
+)
