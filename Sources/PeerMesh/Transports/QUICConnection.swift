@@ -357,8 +357,13 @@ quicDebug("dedicated: yielding data \(payload.count)B")
     /// `StreamHeader` prologue (DD-7). Returns the ready stream positioned at the
     /// payload.
     private func openDedicatedStream(header: StreamHeaderInfo) async throws -> NWConnection {
-        guard let stream = group.extract() else { throw QUICError.connectionClosed }
+        guard let stream = group.extract() else {
+            quicDebug("openDedicated: extract() returned nil (kind=\(header.kind))")
+            throw QUICError.connectionClosed
+        }
+        quicDebug("openDedicated: extracted, awaiting ready (kind=\(header.kind))")
         try await quicAwaitReady(stream, queue: queue)
+        quicDebug("openDedicated: ready")
         let headerBytes = QUICStreamHeaderCodec.encode(header)
         var prologue = Data([QUICFraming.StreamTag.dedicated.rawValue])
         prologue.append(QUICFraming.lengthPrefix(headerBytes.count))

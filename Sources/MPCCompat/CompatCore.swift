@@ -67,6 +67,17 @@ final class CompatCore: @unchecked Sendable {
 
     // MARK: Session lifecycle
 
+    /// MPC-style service types are bare identifiers (`"remotecam"`);
+    /// `MCNearbyServiceAdvertiser` translated them to Bonjour registration
+    /// types internally. PeerMesh's Bonjour discovery needs the full form, so
+    /// the bridge performs the same translation: `"remotecam"` →
+    /// `"_remotecam._udp"` (UDP — the QUIC transport). Apps must declare that
+    /// type under `NSBonjourServices` (MPC apps already declare both `._tcp`
+    /// and `._udp` variants per Apple's guidance). Full-form types pass through.
+    static func bonjourType(fromMPCServiceType type: String) -> String {
+        type.hasPrefix("_") ? type : "_\(type)._udp"
+    }
+
     /// The live `PeerSession`, building it (and starting the pumps) on first use
     /// or after a ``teardown()``.
     func liveSession() -> PeerSession {
@@ -75,7 +86,7 @@ final class CompatCore: @unchecked Sendable {
         if let session = _session { return session }
         let session = PeerSession(
             identity: identity,
-            service: ServiceDescriptor(type: serviceType),
+            service: ServiceDescriptor(type: Self.bonjourType(fromMPCServiceType: serviceType)),
             transport: transport)
         _session = session
         startPumps(on: session)  // lock held; startPumps must not re-enter

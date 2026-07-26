@@ -33,3 +33,12 @@ struct MPCCompatTests {
         #expect(browser.serviceType == "_compat._udp")
     }
 }
+
+extension MPCCompatTests {
+    @Test("MPC-style bare service types translate to Bonjour registration types")
+    func serviceTypeTranslation() {
+        #expect(CompatCore.bonjourType(fromMPCServiceType: "remotecam") == "_remotecam._udp")
+        #expect(CompatCore.bonjourType(fromMPCServiceType: "_already._udp") == "_already._udp")
+        #expect(CompatCore.bonjourType(fromMPCServiceType: "_custom._tcp") == "_custom._tcp")
+    }
+}

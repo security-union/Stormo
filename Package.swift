@@ -21,6 +21,9 @@ let package = Package(
         .library(name: "PeerMeshUI", targets: ["PeerMeshUI"]),
         // In-memory transport and mesh simulation for CI without radios (QA-8).
         .library(name: "PeerMeshTestKit", targets: ["PeerMeshTestKit"]),
+        // Diagnostic CLI: advertise/browse/chat between real processes over
+        // Bonjour + QUIC (the production discovery path).
+        .executable(name: "peermesh", targets: ["PeerMeshCLI"]),
     ],
     dependencies: [
         // Signaling plane serialization (DD-5). Pinned EXACTLY to match the
@@ -57,6 +60,7 @@ let package = Package(
         .target(name: "MPCCompat", dependencies: ["PeerMesh"]),
         .target(name: "PeerMeshUI", dependencies: ["PeerMesh"]),
         .target(name: "PeerMeshTestKit", dependencies: ["PeerMesh"]),
+        .executableTarget(name: "PeerMeshCLI", dependencies: ["PeerMesh"]),
         // Tier 1 (DD-6): engine tests — no transport, no radios, deterministic.
         .testTarget(name: "PeerMeshProtocolTests", dependencies: ["PeerMeshProtocol"]),
         .testTarget(
