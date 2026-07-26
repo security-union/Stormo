@@ -171,17 +171,24 @@ public final class MultipeerSession: @unchecked Sendable {
         core.send(data, to: peerIDs, delivery: delivery)
     }
 
+    /// `MCSession.sendResource` analog. Returns a live `Progress` immediately.
+    ///
+    /// Semantic delta vs MCSession: the completion handler fires when the
+    /// sender finishes streaming the file (or on error/cancel), not on
+    /// confirmed recipient receipt.
     public func sendResource(
         at resourceURL: URL,
         withName resourceName: String,
         toPeer peerID: PeerID,
         withCompletionHandler completionHandler: (@Sendable (Error?) -> Void)? = nil
     ) -> Progress? {
-        // TODO(merge): bridge to PeerSession.sendResource(at:to:) once the
-        // Step 4 data-plane exposes resource transfer + progress events. Absent
-        // in this worktree, so this remains unimplemented (see CompatCore pumps).
-        completionHandler?(PeerMeshError.unimplemented("MultipeerSession.sendResource"))
-        return nil
+        guard let core else {
+            completionHandler?(PeerMeshError.peerUnreachable(peerID))
+            return nil
+        }
+        return core.sendResource(
+            at: resourceURL, name: resourceName, to: peerID,
+            completion: completionHandler)
     }
 
     public func startStream(withName streamName: String, toPeer peerID: PeerID) throws -> OutputStream {

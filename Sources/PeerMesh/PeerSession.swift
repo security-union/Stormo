@@ -189,13 +189,13 @@ public actor PeerSession {
     /// bounded memory (FR-17, QA-3). Announces the transfer on the control
     /// stream (`TransferOffer`), then streams the file in 256 KB chunks on a
     /// dedicated `transferChunk` stream. Cancel via ``ResourceTransfer/progress``.
-    public func sendResource(at url: URL, to peer: PeerID) async throws -> ResourceTransfer {
+    public func sendResource(at url: URL, to peer: PeerID, name resourceName: String? = nil) async throws -> ResourceTransfer {
         guard engine.members.contains(peer), let connection = connections[peer] else {
             throw PeerMeshError.peerUnreachable(peer)
         }
         let attributes = try FileManager.default.attributesOfItem(atPath: url.path)
         let totalBytes = (attributes[.size] as? NSNumber)?.uint64Value ?? 0
-        let name = url.lastPathComponent
+        let name = resourceName ?? url.lastPathComponent
         let id = UUID()
 
         let progress = Progress(totalUnitCount: Int64(totalBytes))

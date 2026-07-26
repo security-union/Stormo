@@ -122,11 +122,29 @@ final class CompatCore: @unchecked Sendable {
         pumpTasks.append(Task { [weak self] in
             for await event in session.discoveries { self?.handleDiscovery(event) }
         })
-        // TODO(merge): when PeerSession exposes resource/incoming-stream event
-        // streams (Step 4 data-plane, landing in parallel), add pumps here to
-        // drive MultipeerSessionDelegate's didStartReceivingResource /
-        // didFinishReceivingResource / didReceive-stream callbacks. Until then
-        // sendResource/startStream surface `unimplemented` (see MultipeerSession).
+        pumpTasks.append(Task { [weak self] in
+            for await event in session.resources { self?.handleResource(event) }
+        })
+    }
+
+    private func handleResource(_ event: ResourceEvent) {
+        delegateQueue.async { [weak self] in
+            guard let self, let session = self.boundSession else { return }
+            switch event {
+            case .started(let name, let from, let progress):
+                session.delegate?.session(
+                    session, didStartReceivingResourceWithName: name,
+                    fromPeer: from, with: progress)
+            case .finished(let name, let from, let url):
+                session.delegate?.session(
+                    session, didFinishReceivingResourceWithName: name,
+                    fromPeer: from, at: url, withError: nil)
+            case .failed(let name, let from, let error):
+                session.delegate?.session(
+                    session, didFinishReceivingResourceWithName: name,
+                    fromPeer: from, at: nil, withError: error)
+            }
+        }
     }
 
     private func handleMembership(_ event: MembershipEvent) {
@@ -255,6 +273,55 @@ final class CompatCore: @unchecked Sendable {
         guard let session = currentSession() else { return }
         let recipients: Recipients = peerIDs.isEmpty ? .all : .peers(peerIDs)
         Task { try? await session.send(data, to: recipients, delivery: delivery) }
+    }
+
+    /// `MCSession.sendResource` bridge: synchronously returns a proxy `Progress`
+    /// that adopts the transfer's real progress once the async send starts.
+    /// Completion fires when the sender finishes streaming (or on error/cancel);
+    /// note MCSession fired it on *recipient* receipt — semantic delta documented
+    /// in `MultipeerSession`.
+    func sendResource(
+        at url: URL,
+        name: String,
+        to peerID: PeerID,
+        completion: (@Sendable (Error?) -> Void)?
+    ) -> Progress {
+        let proxy = Progress(totalUnitCount: 1)
+        proxy.isCancellable = true
+        let session = liveSession()
+        Task { [weak self] in
+            do {
+                let transfer = try await session.sendResource(at: url, to: peerID, name: name)
+                proxy.addChild(transfer.progress, withPendingUnitCount: 1)
+                self?.watchForCompletion(transfer.progress, completion: completion)
+            } catch {
+                proxy.cancel()
+                self?.delegateQueue.async { completion?(error) }
+            }
+        }
+        return proxy
+    }
+
+    private var progressObservations: [UUID: NSKeyValueObservation] = [:]
+
+    private func watchForCompletion(
+        _ progress: Progress, completion: (@Sendable (Error?) -> Void)?
+    ) {
+        guard let completion else { return }
+        let token = UUID()
+        let observation = progress.observe(\.fractionCompleted, options: [.new, .initial]) {
+            [weak self] progress, _ in
+            guard progress.isFinished || progress.isCancelled else { return }
+            self?.delegateQueue.async {
+                completion(progress.isCancelled ? CocoaError(.userCancelled) : nil)
+            }
+            self?.lock.lock()
+            self?.progressObservations.removeValue(forKey: token)
+            self?.lock.unlock()
+        }
+        lock.lock()
+        progressObservations[token] = observation
+        lock.unlock()
     }
 
     // MARK: Delegate dispatch helpers
