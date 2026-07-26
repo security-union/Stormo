@@ -12,11 +12,18 @@ This is the engineering execution plan for the transport and runtime. Update the
 |---|---|---|---|
 | 0 | Scaffolding: SPM package, sans-I/O engine, zero-copy FlatBuffers signaling, CI matrix | ✅ Done (Jul 25–26) | — |
 | 1 | Runtime shell + InMemoryTransport end-to-end | ✅ Done (Jul 26) | — |
-| 2 | Identity & TLS (Keychain, self-signed certs, verify policies, libp2p PeerID) | ⬜ Next | — |
-| 3 | QUICTransport over loopback (tier 2; answers S-3/S-6) | ⬜ | Step 2 (TLS identity) |
-| 4 | Data plane completion + MPCCompat bridge | ⬜ | Step 1 (bridge) / Step 3 (radio truth) |
-| 5 | Hardware spikes S-1/S-2/S-5 (AWDL) | ⬜ | Step 3 + **two physical devices + operator** |
-| 6 | Release engineering: 0.1.0, docs, discoverability | ⬜ | Steps 2–4 |
+| 2 | Identity & TLS (Keychain, self-signed certs, verify policies, libp2p PeerID) | ✅ Done (Jul 26) | — |
+| 3 | QUICTransport over loopback (tier 2; S-3 resolved — see [spike-results](spike-results.md)) | ✅ Done (Jul 26); S-6 formal bench + real RFC 9221 datagrams pending | — |
+| 4 | Data plane completion + MPCCompat bridge | ✅ Done (Jul 26); remote-shutter validation in progress | — |
+| 5 | Hardware spikes S-1/S-2/S-5 (AWDL) | ⬜ **Next requiring operator** | **two physical devices + operator** |
+| 6 | Release engineering: 0.1.0, docs, discoverability | ⬜ | license decision, Step 5 outcomes |
+
+**Jul 26 status:** 48 tests green on `main` across 8 suites — engine, codec,
+runtime, identity/trust (libp2p multihash PeerIDs), ordered delivery, resource
+transfer, byte streams, MPCCompat bridge (incl. the remote-shutter video path),
+and the full QUIC loopback lifecycle. Three Network.framework platform findings
+recorded in [spike-results.md](spike-results.md) (inbound-stream readiness,
+inbound-connection retention, two-step FIN).
 
 Integration proof: `remote-shutter` branch `feat/peermesh-mpccompat` (compiles + full unit suite green against MPCCompat; functional once Step 4 lands).
 
