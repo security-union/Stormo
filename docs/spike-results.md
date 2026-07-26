@@ -130,3 +130,24 @@ plain-Bonjour path (placeholder names possible until connect). If discovery
 works but dial fails in `waiting`, capture both transcripts — next suspects
 are QUIC-over-awdl0 binding (the core S-1 question) and iOS 26 AWDL
 teardown timing (the bug that killed MPC).
+
+## S-1 — RESOLVED: QUIC over AWDL works (Jul 26, real devices)
+
+User-confirmed on iPhone ↔ iPad with **no shared network** (peer-to-peer
+Wi-Fi only): discovery via the plain-Bonjour dual-browse path, QUIC
+handshake, and steady-state operation — live camera preview at ~4.5 KB
+frames every ~30 ms (~33 fps, ~1.2 Mbps) each on its own stream, with
+ordered-message acks (37/40 B) flowing back per frame. Per-message stream
+lifecycle (open → ready → send → FIN) measured under 1 ms on-device.
+
+Consequences:
+- **DD-1 CONFIRMED** — QUIC as primary transport holds on AWDL; the
+  TCP+TLS contingency stays unbuilt.
+- **DD-7 validated at frame rate on hardware** — stream-per-message churn
+  is a non-issue at tens of msgs/sec (partial S-6 answer; formal benchmark
+  can measure the ceiling, not viability).
+- The datagram-on-marked-stream mapping proved sufficient for 33 fps
+  preview; real RFC 9221 datagrams remain a latency optimization, not a
+  functional gap.
+- Remaining hardware spikes: S-2 (mesh ceiling >2 devices) and S-5
+  (backgrounding/resume semantics).

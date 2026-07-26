@@ -15,7 +15,7 @@ This is the engineering execution plan for the transport and runtime. Update the
 | 2 | Identity & TLS (Keychain, self-signed certs, verify policies, libp2p PeerID) | ✅ Done (Jul 26) | — |
 | 3 | QUICTransport over loopback (tier 2; S-3 resolved — see [spike-results](spike-results.md)) | ✅ Done (Jul 26); S-6 formal bench + real RFC 9221 datagrams pending | — |
 | 4 | Data plane completion + MPCCompat bridge | ✅ Done (Jul 26); remote-shutter validated: all platforms build, 553 tests 0 failures, zero app-source changes | — |
-| 5 | Hardware spikes S-1/S-2/S-5 (AWDL) | ⬜ **Next requiring operator** | **two physical devices + operator** |
+| 5 | Hardware spikes (AWDL) | 🟢 S-1 PASSED (Jul 26): QUIC-over-AWDL confirmed on devices — no-infrastructure camera streaming at ~33 fps. S-2 (mesh >2) and S-5 (backgrounding) remain | more devices / lifecycle runs |
 | 6 | Release engineering: 0.1.0, docs, discoverability | ⬜ | license decision, Step 5 outcomes |
 
 **Jul 26 status:** 48 tests green on `main` across 8 suites — engine, codec,
