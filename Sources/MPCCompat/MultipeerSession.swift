@@ -15,8 +15,7 @@ import PeerMesh
 ///
 /// Behavioral notes vs. MCSession:
 /// - Encryption is always on (`.required` semantics); there is no plaintext mode.
-/// - The 8-peer ceiling is lifted; set ``legacyPeerLimit`` to `true` to emulate
-///   it for behavioral-parity testing during migration.
+/// - The 8-peer ceiling is lifted (FR-24), with no cap emulation.
 /// - Delegate callbacks arrive on an internal serial queue, matching MCSession's
 ///   documented behavior.
 ///
@@ -65,9 +64,6 @@ public final class MultipeerSession: @unchecked Sendable {
 
     public let myPeerID: PeerID
 
-    /// Emulate MCSession's 8-peer ceiling (off by default; FR-24).
-    public var legacyPeerLimit = false
-
     /// Bonjour service type placeholder; superseded by the attaching
     /// advertiser/browser's `serviceType` (MC carries no service on the session).
     private let placeholderService: String
@@ -94,8 +90,7 @@ public final class MultipeerSession: @unchecked Sendable {
 
     /// `MCSession(peer:)` analog taking a display name.
     public convenience init(peer name: String, service: String) {
-        let id = (try? PeerIdentity.loadOrCreate(name: name))?.id ?? PeerIdentity(name: name).id
-        self.init(myPeerID: id, service: service, transport: nil)
+        self.init(myPeerID: PeerIdentity.loadOrCreate(name: name).id, service: service, transport: nil)
     }
 
     /// `MCSession(peer:securityIdentity:encryptionPreference:)` analog.
@@ -196,9 +191,11 @@ public final class MultipeerSession: @unchecked Sendable {
             completion: completionHandler)
     }
 
+    /// `MCSession.startStream` analog. Not yet bridged: the `NSStream` adapter
+    /// over `PeerByteStream` (FR-18) is future work — TODO(compat-nsstream-bridge).
+    /// Modern callers should use `PeerSession.openStream` (byte streams
+    /// themselves are implemented; only the `NSStream` shim is not).
     public func startStream(withName streamName: String, toPeer peerID: PeerID) throws -> OutputStream {
-        // TODO(merge): NSStream bridge over PeerByteStream once byte streams land
-        // (FR-18); modern callers should use PeerSession.openStream instead.
         throw PeerMeshError.unimplemented("MultipeerSession.startStream")
     }
 

@@ -3,7 +3,7 @@ import Testing
 
 @testable import PeerMesh
 
-@Suite("PeerMesh core scaffolding")
+@Suite("PeerMesh core")
 struct PeerMeshTests {
 
     @Test("Identity derives PeerID from public key hash")
@@ -38,8 +38,8 @@ struct PeerMeshTests {
         await session.disconnect()
     }
 
-    @Test("Unimplemented Phase 1 surface throws, not traps")
-    func unimplementedSurfaceThrows() async {
+    @Test("Send with no members throws, not traps")
+    func sendWithNoMembersThrows() async {
         let hub = InMemoryTransport.Hub()
         let session = PeerSession(
             identity: PeerIdentity(name: "T"),

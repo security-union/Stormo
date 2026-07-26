@@ -166,7 +166,7 @@ public actor PeerSession {
         knownEndpoints[peer.id] = peer
         return try await withCheckedThrowingContinuation { continuation in
             guard inviteWaiters[peer.id] == nil else {
-                continuation.resume(throwing: PeerMeshError.unimplemented("concurrent invite to same peer"))
+                continuation.resume(throwing: PeerMeshError.invitationAlreadyPending(peer.id))
                 return
             }
             inviteWaiters[peer.id] = continuation
@@ -279,19 +279,23 @@ public actor PeerSession {
         switch effect {
         case .connect(let peerID):
             guard let endpoint = knownEndpoints[peerID] else {
-                // Roster gossip may name peers we haven't discovered yet
-                // (TODO Phase 1: mesh join via endpoint exchange). For the
-                // invitation path this means: never discovered → unreachable.
+                // Roster gossip may name peers we haven't discovered yet.
+                // TODO(mesh-join): learn their endpoints via endpoint exchange.
+                // Until then the invitation path treats never-discovered as
+                // unreachable.
                 run(.connectionClosed(peerID))
                 return
             }
+            // This Task inherits the actor's isolation, so `adopt`/`run` are
+            // same-actor synchronous calls (no `await` hop); only the transport
+            // dial is genuinely async.
             Task { [transport, identity, trust] in
                 do {
                     let connection = try await transport.connect(
                         to: endpoint, identity: identity, trust: trust)
-                    await self.adopt(connection)
+                    self.adopt(connection)
                 } catch {
-                    await self.run(.connectionClosed(peerID))
+                    self.run(.connectionClosed(peerID))
                 }
             }
 

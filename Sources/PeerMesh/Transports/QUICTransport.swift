@@ -486,8 +486,11 @@ extension Data {
 
 #else
 
-/// Fallback for platforms without Network/Security: the QUIC driver is
-/// unavailable; `PeerSession` must be constructed with an explicit transport.
+/// Fallback for platforms without Network.framework/Security (e.g. Linux): the
+/// QUIC driver cannot exist, so every network operation throws
+/// `.unimplemented`. This is a hard platform floor, not a TODO — a `PeerSession`
+/// on such a platform must be constructed with an explicit non-QUIC transport
+/// (e.g. `InMemoryTransport`).
 public struct QUICTransport: PeerTransport {
     public let inboundConnections: AsyncStream<any PeerConnection> = AsyncStream { _ in }
     public init() {}

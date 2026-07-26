@@ -24,9 +24,10 @@ public enum SignalCodec {
     /// input from a peer that may not be authenticated yet) and wrap them for
     /// in-place reading.
     ///
-    /// - TODO(Phase 1): distinguish "unknown union variant from a newer peer"
-    ///   (must be tolerated per QA-11 — pre-read `bodyType` before full
-    ///   verification) from structural malformation (connection-fatal).
+    /// Forward compatibility (QA-11): a newer peer's unknown union variant still
+    /// passes the verifier — it is structurally valid — and surfaces as
+    /// ``Signal/Body/unrecognized`` (ignored-and-logged, DD-5 rule 1). Only
+    /// genuine structural malformation throws, and that is connection-fatal.
     public static func decode(_ data: Data) throws -> Signal {
         guard data.count <= maxControlMessageSize, !data.isEmpty else {
             throw PeerMeshError.malformedSignal

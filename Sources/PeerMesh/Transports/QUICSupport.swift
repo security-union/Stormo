@@ -46,7 +46,7 @@ enum QUICError: Error, Sendable, LocalizedError {
 
 #if canImport(Network) && canImport(Security)
 
-// MARK: - Debug logging (temporary; env-gated)
+// MARK: - Diagnostic logging (env-gated: QUIC_DEBUG, optional QUIC_DEBUG_LOG)
 
 let quicDebugEnabled = ProcessInfo.processInfo.environment["QUIC_DEBUG"] != nil
 let quicDebugLogPath = ProcessInfo.processInfo.environment["QUIC_DEBUG_LOG"]
@@ -60,26 +60,6 @@ func quicDebug(_ s: @autoclosure () -> String) {
         h.seekToEndOfFile(); h.write(Data((line + "\n").utf8)); try? h.close()
     } else {
         try? Data((line + "\n").utf8).write(to: url)
-    }
-}
-
-// MARK: - Lock box (driver-internal shared state)
-
-/// Minimal lock box for QUIC-driver-internal state (mirrors the TestKit helper;
-/// the two live in different modules).
-final class Locked<T>: @unchecked Sendable {
-    private let lock = NSLock()
-    private var stored: T
-
-    init(_ value: T) { self.stored = value }
-
-    var value: T {
-        get { lock.withLock { stored } }
-        set { lock.withLock { stored = newValue } }
-    }
-
-    func withLock<R>(_ body: (inout T) -> R) -> R {
-        lock.withLock { body(&stored) }
     }
 }
 

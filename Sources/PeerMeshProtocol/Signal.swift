@@ -221,12 +221,19 @@ public enum Recipients: Sendable, Equatable {
 }
 
 public enum PeerMeshError: Error, Sendable, Equatable {
-    /// Scaffolding placeholder: the API surface exists, the engine is Phase 1 work.
+    /// A surface that is deliberately not wired up yet on this platform or build.
+    /// The associated string names it; each call site carries a comment pointing
+    /// at the relevant TODO ledger entry (see CLAUDE.md). Current uses: the
+    /// `MPCCompat` `NSStream` bridge (ledger: compat-nsstream-bridge) and the
+    /// no-Network.framework `QUICTransport` fallback.
     case unimplemented(String)
     /// Local Network permission denied or restricted (FR-4).
     case localNetworkPermissionDenied
     case invitationTimedOut
     case invitationDeclined
+    /// An invite to a peer is already in flight; the framework enforces one
+    /// concurrent invitation per peer (FR-6).
+    case invitationAlreadyPending(PeerID)
     case peerUnreachable(PeerID)
     /// Inbound signaling failed FlatBuffers verification (DD-5 rule 3).
     case malformedSignal

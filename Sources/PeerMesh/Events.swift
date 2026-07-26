@@ -76,8 +76,13 @@ public struct Invitation: Sendable {
     /// only over the encrypted channel (FR-8).
     public let context: Data?
 
-    /// Certificate/key hash of the inviter, available to the app before
-    /// admission (FR-22).
+    /// The inviter's TLS-authenticated public-key hash, surfaced to the app
+    /// before it admits the peer (FR-22 — the verification-callback parity with
+    /// MPC's `didReceiveCertificate`). Equals ``from``'s `keyHash` under
+    /// `.automatic` trust; it is a distinct field because an app running
+    /// `.pinned`/`.pairingCode` verifies against this authenticated value rather
+    /// than the self-reported identity. Part of the public FR-22 surface even
+    /// though PeerMesh's own consumers (MPCCompat/UI) do not yet read it.
     public let inviterKeyHash: Data
 
     public let accept: @Sendable () async -> Void
