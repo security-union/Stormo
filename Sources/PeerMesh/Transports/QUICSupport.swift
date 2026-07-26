@@ -194,11 +194,27 @@ func quicReceiveFrame(_ connection: NWConnection) async throws -> Data {
 }
 
 /// Await an NWConnection reaching `.ready` (or throw on failure/cancel).
-func quicAwaitReady(_ connection: NWConnection, queue: DispatchQueue) async throws {
+///
+/// Bounded (`timeout`, default 10 s): when the underlying tunnel/AWDL path has
+/// silently died, new streams sit in `.preparing` forever — sends must FAIL
+/// fast rather than queue unbounded retries (the mid-session stall produced a
+/// pile-up of ~150 stuck streams all timing out together 30 s later).
+/// Post-completion state transitions are not re-logged (that pile-up also
+/// flooded the log with one `failed` line per stuck stream).
+func quicAwaitReady(
+    _ connection: NWConnection, queue: DispatchQueue, timeout: TimeInterval = 10
+) async throws {
     let done = Locked(false)
     try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Void, Error>) in
+        queue.asyncAfter(deadline: .now() + timeout) {
+            if done.compareAndSet(expected: false, new: true) {
+                quicDebug("stream ready TIMEOUT after \(timeout)s — failing send")
+                connection.cancel()
+                cont.resume(throwing: QUICError.connectionClosed)
+            }
+        }
         connection.stateUpdateHandler = { state in
-            quicDebug("stream state=\(state)")
+            if !done.value { quicDebug("stream state=\(state)") }
             switch state {
             case .ready:
                 if done.compareAndSet(expected: false, new: true) { cont.resume() }

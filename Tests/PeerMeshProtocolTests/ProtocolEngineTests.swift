@@ -124,7 +124,10 @@ struct ProtocolEngineTests {
         engine.admit(carol)
 
         let effects = engine.handle(.connectionClosed(bob))
-        #expect(effects == [.emit(.peerLeft(bob))])
+        #expect(effects == [
+            .cancelTimer(.keepAlive(bob)),  // heartbeat stops with membership
+            .emit(.peerLeft(bob)),
+        ])
         #expect(engine.members == [carol])
     }
 
