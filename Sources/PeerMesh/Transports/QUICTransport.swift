@@ -93,6 +93,28 @@ public final class QUICTransport: PeerTransport, @unchecked Sendable {
     /// so this is `true`. On platforms with no entitlement-free route it is
     /// `false` — QUIC tests should skip cleanly and hosts should inject a
     /// `SecIdentity` via ``Configuration/tlsProvider``.
+    /// Peer-to-peer Wi-Fi opt-out (`PEERMESH_NO_P2P=1`): same-machine
+    /// self-dials fail with `includePeerToPeer` enabled (docs/spike-results.md),
+    /// so entitled in-process E2E tests disable it. Read dynamically — tests
+    /// may `setenv` before starting services.
+    static var peerToPeerEnabled: Bool {
+        ProcessInfo.processInfo.environment["PEERMESH_NO_P2P"] == nil
+    }
+
+    /// Bonjour registration types are `_name._tcp|_udp` with a 1–15 char name.
+    /// An invalid type (e.g. MPC-style bare `"remotecam"`) registers NOTHING,
+    /// silently — the failure mode that only surfaced on physical devices.
+    /// Validate loudly instead.
+    static func validateBonjourType(_ type: String) throws {
+        let pattern = "^_[A-Za-z0-9][A-Za-z0-9-]{0,14}\\._(tcp|udp)$"
+        if type.range(of: pattern, options: .regularExpression) == nil {
+            throw QUICError.listenerFailed(
+                "invalid Bonjour service type '\(type)' — expected \"_name._udp\" "
+                    + "(1–15 char name). MPC-style bare types are translated by "
+                    + "MPCCompat; native API callers must pass the full form.")
+        }
+    }
+
     public static func isTLSIdentityAvailable(for identity: PeerIdentity) -> Bool {
         guard let local = try? QUICTLS.makeLocalIdentity(for: identity) else { return false }
         local.dispose()
@@ -128,7 +150,8 @@ public final class QUICTransport: PeerTransport, @unchecked Sendable {
         // connections, so it is gated to the Bonjour (production) path.
         let isBonjour: Bool
         if case .bonjour = configuration.discovery { isBonjour = true } else { isBonjour = false }
-        params.includePeerToPeer = isBonjour
+        if isBonjour { try Self.validateBonjourType(service.type) }
+        params.includePeerToPeer = isBonjour && Self.peerToPeerEnabled
 
         let listener = try NWListener(using: params)
         if isBonjour {
@@ -191,6 +214,7 @@ public final class QUICTransport: PeerTransport, @unchecked Sendable {
         case .rendezvous(let rendezvous):
             return await rendezvous.browse(service: service, sink: endpoints)
         case .bonjour:
+            try Self.validateBonjourType(service.type)
             return bonjourDiscoveries(service: service)
         }
     }
@@ -198,7 +222,7 @@ public final class QUICTransport: PeerTransport, @unchecked Sendable {
     private func bonjourDiscoveries(service: ServiceDescriptor) -> AsyncStream<DiscoveryEvent> {
         let (stream, continuation) = AsyncStream<DiscoveryEvent>.makeStream()
         let params = NWParameters()
-        params.includePeerToPeer = true
+        params.includePeerToPeer = Self.peerToPeerEnabled
         let browser = NWBrowser(
             for: .bonjourWithTXTRecord(type: service.type, domain: nil), using: params)
         let endpoints = self.endpoints

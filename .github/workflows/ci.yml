@@ -79,3 +79,14 @@ jobs:
 
 # TODO(S-6): nightly workflow_dispatch job — stream-churn benchmark and 32-peer
 # mesh simulation with timing budgets (QA-2, QA-8).
+
+  # Tier 2.5: cross-process exchange over the production Bonjour+QUIC path —
+  # two real processes, real mDNS, real QUIC. The rung that caught the FIN
+  # and inbound-retention bugs.
+  cross-process-e2e:
+    name: Cross-process Bonjour+QUIC E2E
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run E2E script
+        run: ./Scripts/e2e-cli.sh

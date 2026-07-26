@@ -60,3 +60,24 @@ struct PeerMeshTests {
 }
 
 import PeerMeshTestKit
+
+#if canImport(Network) && canImport(Security)
+extension PeerMeshTests {
+    @Test("Invalid Bonjour service types are rejected loudly, not silently")
+    func bonjourTypeValidation() throws {
+        // The class of bug that reached physical devices: a bare MPC-style
+        // type registers nothing, silently. It must throw instead.
+        #expect(throws: (any Error).self) {
+            try QUICTransport.validateBonjourType("remotecam")
+        }
+        #expect(throws: (any Error).self) {
+            try QUICTransport.validateBonjourType("_waytoolongservicename._udp")
+        }
+        #expect(throws: (any Error).self) {
+            try QUICTransport.validateBonjourType("_x._quic")
+        }
+        try QUICTransport.validateBonjourType("_remotecam._udp")
+        try QUICTransport.validateBonjourType("_pmdemo._tcp")
+    }
+}
+#endif
