@@ -17,7 +17,7 @@ the hard-won platform-findings log and the source of the failure modes below.
 | **MPCCompat** | library | Near-drop-in `MCSession`/`MCPeerID`/advertiser/browser analogs over `PeerSession` (FR-24). |
 | **PeerMeshUI** | library | SwiftUI peer picker + invitation consent (FR-23). **Experimental preview, API unstable.** |
 | **PeerMeshTestKit** | library | `InMemoryTransport` (+ mesh sim) and `ReorderingTransport` — CI without radios (QA-8). |
-| **PeerMeshCLI** (`peermesh`) | executable | Diagnostic advertise/browse/host/join over real Bonjour+QUIC between processes. |
+| **PeerMeshCLI** (`peermesh-cli`) | executable | Diagnostic advertise/browse/host/join over real Bonjour+QUIC between processes. |
 
 ## Build & test
 

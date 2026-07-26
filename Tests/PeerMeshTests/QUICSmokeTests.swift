@@ -7,21 +7,11 @@ import PeerMesh
 struct QUICSmokeTests {
     #if canImport(Network) && canImport(Security)
 
-    static let logURL = URL(fileURLWithPath: "/private/tmp/claude-501/-Users-darioalessandro-Documents-multipeer-connectivity/2401fce3-1214-4515-9cbb-686ff2125601/scratchpad/phases.log")
-
-    static func log(_ s: String) {
-        let line = "\(Date().timeIntervalSince1970) \(s)\n"
-        if let h = try? FileHandle(forWritingTo: logURL) {
-            h.seekToEndOfFile(); h.write(Data(line.utf8)); try? h.close()
-        } else {
-            try? Data(line.utf8).write(to: logURL)
-        }
-    }
-
+    /// Names the failing step in CI output when an await inside `body` hangs
+    /// or throws — the phase name is the diagnostic.
     func phase(_ name: String, _ body: () async throws -> Void) async throws {
-        Self.log("START \(name)")
+        print("PHASE \(name)")
         try await body()
-        Self.log("OK \(name)")
     }
 
     @Test("QUIC loopback: discovery → invite → messaging both directions")

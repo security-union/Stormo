@@ -20,6 +20,17 @@ jobs:
       - uses: actions/checkout@v4
       - name: Run tests with coverage
         run: swift test --enable-code-coverage
+        env:
+          QUIC_DEBUG: "1"
+          QUIC_DEBUG_LOG: /tmp/quic-debug.log
+      - name: Diagnostics on failure (QUIC log + crash reports)
+        if: failure()
+        run: |
+          tail -200 /tmp/quic-debug.log 2>/dev/null || true
+          for f in ~/Library/Logs/DiagnosticReports/*.ips; do
+            [ -e "$f" ] || continue
+            echo "=== $f ==="; head -120 "$f"
+          done
       - name: Export coverage summary
         run: |
           BIN_PATH=$(swift build --show-bin-path)
@@ -70,10 +81,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Install pinned flatc
-        run: brew install flatbuffers # TODO: replace with `nix develop` once CI nix cache is set up
+        # Exact-version pin rule (CLAUDE.md): flatc MUST equal the FlatBuffers
+        # runtime pinned in Package.swift. brew would install latest and drift.
+        run: |
+          curl -fsSL -o /tmp/flatc.zip \
+            https://github.com/google/flatbuffers/releases/download/v25.2.10/Mac.flatc.binary.zip
+          unzip -o /tmp/flatc.zip -d /tmp/flatc-bin
+          /tmp/flatc-bin/flatc --version | grep -F '25.2.10'
       - name: Regenerate and diff
         run: |
-          flatc --swift -o /tmp/generated Schemas/*.fbs
+          /tmp/flatc-bin/flatc --swift -o /tmp/generated Schemas/*.fbs
           diff -r /tmp/generated Sources/PeerMeshProtocol/Generated \
             || { echo '::error::Generated sources drifted from schemas (DD-5 rule 4)'; exit 1; }
 
@@ -90,3 +107,5 @@ jobs:
       - uses: actions/checkout@v4
       - name: Run E2E script
         run: ./Scripts/e2e-cli.sh
+        env:
+          QUIC_DEBUG: "1"
