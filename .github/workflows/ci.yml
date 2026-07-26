@@ -115,11 +115,19 @@ jobs:
           QUIC_DEBUG: "1"
           # Same-machine host+joiner on an AWDL-less VM — see failure mode 10.
           PEERMESH_NO_P2P: "1"
-      - name: Crash reports on failure
+      - name: Crash backtrace on failure (joiner under lldb)
         if: failure()
+        env:
+          PEERMESH_NO_P2P: "1"
         run: |
-          sleep 5 # ReportCrash writes .ips asynchronously
-          for f in ~/Library/Logs/DiagnosticReports/*.ips; do
-            [ -e "$f" ] || continue
-            echo "=== $f ==="; head -120 "$f"
-          done
+          # The joiner SIGTRAPs dialing a Bonjour .service endpoint on runner
+          # VMs with no visible crash report; reproduce under lldb for a stack.
+          BIN="$(swift build --show-bin-path)/peermesh-cli"
+          "$BIN" host --name BTHost --service _pmbt1._udp --timeout 45 --once \
+            > /tmp/bt-host.log 2>&1 &
+          sleep 2
+          lldb -b -o run -o 'bt all' -o quit -- \
+            "$BIN" join --name BTJoin --service _pmbt1._udp \
+            --peer BTHost --send bt-ping 2>&1 | tail -100
+          echo "--- fault-level unified log ---"
+          log show --last 3m --predicate 'messageType == fault' --style compact 2>/dev/null | tail -30 || true
