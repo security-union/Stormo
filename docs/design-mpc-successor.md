@@ -295,7 +295,7 @@ flowchart TD
 
 ### 7.1 Key flows (sequence diagrams)
 
-The invitation/session-establishment flow is diagrammed under DD-2. The flows below cover the other major pieces: discovery, reliable message passing (stream-per-message, DD-7), and resource transfer. Each shows the sans-I/O split (DD-6): engines decide, drivers move bytes.
+The invitation/session-establishment flow is diagrammed under DD-2. The flows below cover the other major pieces: discovery, reliable message passing (stream-per-message, DD-7), resource transfer, and connection ownership (who hosts, who dials — FR-12). Each shows the sans-I/O split (DD-6): engines decide, drivers move bytes.
 
 **Discovery and advertising (FR-1..FR-5):**
 
@@ -376,6 +376,52 @@ sequenceDiagram
         DA->>DB: RESET_STREAM — receiver discards partial temp file
     end
 ```
+
+**Connection ownership — who hosts, who dials (FR-12, DD-3):**
+
+Exactly one QUIC connection exists per peer pair. The **advertiser hosts**: its
+`NWListener` owns the QUIC endpoint and accepts inbound connection groups
+(retained via the pending-inbound table — spike finding 2). The **inviter
+dials**: `invite()` creates the `NWConnectionGroup` toward the discovered
+endpoint (on pre-26 OSes the `.service` endpoint is resolved to a concrete
+`hostPort` first — failure mode 12). Every subsequent exchange in *both*
+directions — control signals, keepalives, per-message streams, transfers —
+multiplexes over that single connection; streams are opened from either side,
+and there is never a dial back.
+
+```mermaid
+flowchart LR
+    B["Peer B — browser/inviter<br/>invite() dials:<br/>NWConnectionGroup(NWMultiplexGroup)"]
+    A["Peer A — advertiser<br/>NWListener hosts the QUIC endpoint,<br/>accepts + retains inbound groups"]
+    subgraph CONN["ONE shared QUIC connection per pair (FR-12)"]
+        direction TB
+        CS["control stream (tag 0x00):<br/>PeerHello · invitation · roster gossip · keepalives (DD-5)"]
+        DS["one short-lived stream PER message /<br/>transfer / app byte stream, either direction (DD-7)"]
+    end
+    B -- dial --> CONN
+    CONN -- accept --> A
+```
+
+A second invitation in the opposite direction, or any send, reuses the
+established connection (the engine emits `.sendSignal`, not `.connect`, when a
+connection to that peer already exists). The dial-direction **tie-break**
+(`ProtocolEngine.shouldDial`) exists for the one case with no natural dialer:
+mesh growth via roster gossip (FR-13), where two members learn of each other
+simultaneously and both would otherwise dial:
+
+```mermaid
+sequenceDiagram
+    participant C as Peer C (lower key hash)
+    participant D as Peer D (higher key hash)
+    Note over C,D: Same roster gossip names each to the other (FR-13) —<br/>no inviter, so no natural dial direction
+    C->>C: shouldDial(C → D)? lower hash — dial
+    D->>D: shouldDial(D → C)? higher hash — wait for C's dial
+    C->>D: single dial → one connection (FR-12 holds)
+```
+
+In the default `fullMesh(maxPeers: 32)` topology (DD-3) each pair holds one
+connection, so a device carries at most N−1 connections; `.hostRelay` reduces
+that to 1 for non-host members.
 
 API sketch (illustrative):
 
