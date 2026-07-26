@@ -423,6 +423,38 @@ In the default `fullMesh(maxPeers: 32)` topology (DD-3) each pair holds one
 connection, so a device carries at most N−1 connections; `.hostRelay` reduces
 that to 1 for non-host members.
 
+**TLS roles and mutual authentication (FR-19..FR-22, DD-2):**
+
+The advertiser is the QUIC/TLS **server**, the inviter the **client** — but the
+roles matter only to the handshake choreography; the cryptography is symmetric.
+This is **mutual TLS**: both sides build their `NWParameters` identically
+(`QUICTLS.parameters`) — each presents its self-signed P-256 leaf certificate
+as the local identity, each sets `peer_authentication_required`, so the server
+demands a client certificate exactly as the client demands a server one. No
+CA, no chain: PKI is never consulted. Both sides install the *same* verify
+block, which extracts the peer's leaf DER and applies the session
+`TrustPolicy` via `TrustEvaluator` (`.automatic` TOFU record / `.pairingCode`
+/ `.pinned`). After the handshake, each side recovers the peer's
+TLS-authenticated key hash from the connection metadata and cross-checks it
+against the `PeerHello` identity — a mismatch is `identityMismatch` and the
+connection dies. The PeerID *is* the key hash (FR-20), so the transport
+identity and the session identity are the same fact, authenticated in both
+directions.
+
+```mermaid
+sequenceDiagram
+    participant B as Inviter — QUIC/TLS client
+    participant A as Advertiser — QUIC/TLS server (NWListener)
+    B->>A: QUIC ClientHello (ALPN peermesh/1)
+    A->>B: server cert: self-signed P-256 leaf + CertificateRequest (mTLS)
+    B->>A: client cert: self-signed P-256 leaf
+    Note over B,A: Each side runs the SAME verify block — PKI ignored,<br/>leaf DER → TrustEvaluator with the session TrustPolicy<br/>(.automatic TOFU / .pairingCode / .pinned)
+    Note over B,A: Handshake complete: encrypted +<br/>certificate-authenticated in BOTH directions (FR-19)
+    B->>A: control stream: PeerHello{keyHash, displayName}
+    A->>B: control stream: PeerHello{keyHash, displayName}
+    Note over B,A: Each side cross-checks PeerHello.keyHash against the<br/>TLS-authenticated certificate key hash (FR-22) —<br/>mismatch ⇒ identityMismatch, connection dropped
+```
+
 API sketch (illustrative):
 
 ```swift
