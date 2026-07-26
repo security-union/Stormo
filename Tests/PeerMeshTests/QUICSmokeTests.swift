@@ -75,3 +75,50 @@ struct QUICSmokeTests {
     }
     #endif
 }
+
+extension QUICSmokeTests {
+    #if canImport(Network) && canImport(Security)
+    /// Same lifecycle as the rendezvous test but over REAL Bonjour discovery,
+    /// both sessions in one process — the exact combination the entitled-app
+    /// loopback test runs (where it stalls at hello-send on Catalyst).
+    /// Isolates: in-process + Bonjour on plain macOS.
+    @Test("QUIC in-process lifecycle over real Bonjour discovery")
+    func bonjourLifecycle() async throws {
+        guard QUICTransport.isTLSIdentityAvailable(for: PeerIdentity(name: "probe")) else {
+            print("[skip] QUIC: no TLS identity in this environment"); return
+        }
+        setenv("PEERMESH_NO_P2P", "1", 1)
+        let service = ServiceDescriptor(type: "_pmbj\(UInt16.random(in: 1000...9999))._udp")
+        func transport() -> QUICTransport { QUICTransport(configuration: .init(discovery: .bonjour)) }
+        let camera = PeerSession(
+            identity: PeerIdentity(name: "BjCamera"), service: service, transport: transport())
+        let monitor = PeerSession(
+            identity: PeerIdentity(name: "BjMonitor"), service: service, transport: transport())
+
+        try await camera.startAdvertising(metadata: ["role": "camera"])
+        let accept = Task { for await inv in camera.invitations { await inv.accept(); break } }
+
+        try await monitor.startBrowsing()
+        var found: DiscoveredPeer?
+        for await event in monitor.discoveries {
+            if case .found(let peer) = event, peer.id.displayName == "BjCamera" {
+                found = peer; break
+            }
+        }
+        let member = try await monitor.invite(try #require(found), timeout: 15)
+        #expect(member.id.displayName == "BjCamera")
+        await accept.value
+
+        let inbox = Task<InboundMessage?, Never> {
+            for await m in camera.messages { return m }
+            return nil
+        }
+        try await monitor.send(Data([0xB0]), delivery: .reliable)
+        let got = try #require(await inbox.value)
+        #expect(got.payload == Data([0xB0]))
+
+        await monitor.disconnect()
+        await camera.disconnect()
+    }
+    #endif
+}

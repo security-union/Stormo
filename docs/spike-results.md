@@ -54,3 +54,20 @@ physical device lab (implementation plan Step 5).
 hook; tests use `QUICTransport.isTLSIdentityAvailable` to skip cleanly where
 no identity can be formed. On this development machine the data-protection
 keychain path works and the QUIC suite runs for real.
+
+## In-process pairing matrix (Jul 26, gap-closure pass)
+
+| Combination | Result |
+|---|---|
+| Same process, rendezvous discovery, macOS `swift test` | ✅ 0.16 s |
+| Two processes, Bonjour, macOS (CLI / `Scripts/e2e-cli.sh`) | ✅ ~0.3 s warm, ~4 s first contact |
+| Same process, Bonjour, macOS `swift test` | ✅ but slow (~11 s incl. registration+browse) |
+| Same process, Bonjour, **Catalyst** entitled app host | ❌ stalls at hello-send: TLS completes both ways, dialer control stream `ready`, but the first `send`'s completion never fires. Catalyst-sandbox-specific; the app-loopback test skips with reason. Not the cross-device path. |
+
+Operational finding: FIRST-contact Bonjour+QUIC establishment can take
+seconds (mDNS registration + resolve + handshake). App-level invite/state
+timeouts near 10 s are marginal on first contact — remote-shutter's
+coordinator arms 10 s transient-state timeouts, a candidate explanation for
+device-side "Connecting → Not Connected" alongside AP client isolation.
+The QUIC_DEBUG transcript discriminates: dial stuck in `waiting` = network
+path blocked; steady progress cut short = timeout too tight.
