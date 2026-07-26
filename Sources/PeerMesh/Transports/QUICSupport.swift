@@ -27,6 +27,9 @@ enum QUICError: Error, Sendable, LocalizedError {
     /// A dedicated stream announced a malformed `StreamHeader` (DD-5 discipline).
     case malformedStreamHeader
     case listenerFailed(String)
+    /// A Bonjour `.service` endpoint could not be resolved to a concrete
+    /// address for the multiplex-group dial (failure mode 12).
+    case serviceResolutionFailed
 
     // NSError bridging renumbers payload cases (tlsIdentityUnavailable
     // surfaces as "error 0"), hiding the diagnostic string entirely —
@@ -40,6 +43,8 @@ enum QUICError: Error, Sendable, LocalizedError {
             return "PeerMesh QUIC: no local TLS identity — \(reason)"
         case .malformedStreamHeader: return "PeerMesh QUIC: malformed stream header"
         case .listenerFailed(let reason): return "PeerMesh QUIC: listener failed — \(reason)"
+        case .serviceResolutionFailed:
+            return "PeerMesh QUIC: Bonjour service endpoint did not resolve"
         }
     }
 }
@@ -213,6 +218,65 @@ func quicAwaitReady(
         if case .ready = connection.state {
             if done.compareAndSet(expected: false, new: true) { cont.resume() }
         }
+    }
+}
+
+/// Resolve a Bonjour `.service` endpoint to the concrete `hostPort` it names,
+/// using a throwaway UDP connection (readiness = flow assigned; no bytes sent).
+///
+/// Failure mode 12: `NWMultiplexGroup` accepts only concrete endpoints before
+/// macOS 26 / iOS 26 — handing it a `.service` endpoint traps in libnetwork
+/// ("invalid endpoint type for multiplex group"). Plain `NWConnection` resolves
+/// `.service` endpoints on every supported OS, and its ready path carries the
+/// resolved remote address (scoped, so AWDL link-local routes survive).
+func quicResolveServiceEndpoint(
+    _ endpoint: NWEndpoint,
+    includePeerToPeer: Bool,
+    queue: DispatchQueue,
+    timeout: TimeInterval = 10
+) async throws -> NWEndpoint {
+    let params = NWParameters.udp
+    // Must match the group dial's p2p setting or resolution may pick an
+    // interface the dial cannot use.
+    params.includePeerToPeer = includePeerToPeer
+    let probe = NWConnection(to: endpoint, using: params)
+    let done = Locked(false)
+    return try await withCheckedThrowingContinuation { (cont: CheckedContinuation<NWEndpoint, Error>) in
+        queue.asyncAfter(deadline: .now() + timeout) {
+            if done.compareAndSet(expected: false, new: true) {
+                quicDebug("resolve TIMEOUT after \(timeout)s")
+                probe.cancel()
+                cont.resume(throwing: QUICError.serviceResolutionFailed)
+            }
+        }
+        probe.stateUpdateHandler = { state in
+            if !done.value { quicDebug("resolve state=\(state)") }
+            switch state {
+            case .ready:
+                let resolved = probe.currentPath?.remoteEndpoint
+                probe.cancel()
+                if done.compareAndSet(expected: false, new: true) {
+                    if let resolved {
+                        quicDebug("resolve: \(endpoint) -> \(resolved)")
+                        cont.resume(returning: resolved)
+                    } else {
+                        cont.resume(throwing: QUICError.serviceResolutionFailed)
+                    }
+                }
+            case .failed(let error):
+                probe.cancel()
+                if done.compareAndSet(expected: false, new: true) {
+                    cont.resume(throwing: error)
+                }
+            case .cancelled:
+                if done.compareAndSet(expected: false, new: true) {
+                    cont.resume(throwing: QUICError.serviceResolutionFailed)
+                }
+            default:
+                break
+            }
+        }
+        probe.start(queue: queue)
     }
 }
 

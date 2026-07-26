@@ -101,13 +101,21 @@ code that guards them without understanding why it exists.
    iOS 26 (the bug that killed MPC). Keepalives exist to assert interface use and
    hold the QUIC idle timeout.
 10. **`includePeerToPeer` breaks same-machine self-dials.** Use
-    `PEERMESH_NO_P2P=1` for in-process tests. On AWDL-less VMs (GitHub CI
-    runners) a p2p dial doesn't just fail — it SIGTRAPs inside libnetwork, so
-    CI sets the flag for every same-machine job (swift test and cross-process
-    E2E alike). Note `ProcessInfo.environment` caches at first access; the
-    driver reads this flag via `getenv` so a test's `setenv` actually lands.
+    `PEERMESH_NO_P2P=1` for in-process tests; CI sets it for every
+    same-machine job. Note `ProcessInfo.environment` caches at first access;
+    the driver reads this flag via `getenv` so a test's `setenv` actually
+    lands.
 11. **Swift NSError bridging renumbers payload enum cases.** All public errors
     must conform to `LocalizedError` so the diagnostic string survives bridging.
+12. **`NWMultiplexGroup` traps on Bonjour `.service` endpoints before
+    macOS 26/iOS 26** — libnetwork SIGTRAPs ("invalid endpoint type for
+    multiplex group"; no crash report, no Swift fatal message). macOS 26+
+    resolves them, which is why it only reproduced on CI's macos-15 runners.
+    Pre-26 dials resolve `.service` → concrete `hostPort` first via a
+    throwaway UDP `NWConnection` (`quicResolveServiceEndpoint`); the direct
+    `.service` dial is kept on 26+ where it is hardware-validated. The pre-26
+    resolve path is exercised by CI but NOT yet validated on pre-26 hardware
+    over AWDL (see mesh-hardware in the TODO ledger).
 
 ## TODO ledger (single authoritative list)
 

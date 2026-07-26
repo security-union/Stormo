@@ -23,8 +23,8 @@ jobs:
         env:
           QUIC_DEBUG: "1"
           QUIC_DEBUG_LOG: /tmp/quic-debug.log
-          # Runner VMs have no AWDL; p2p dials trap there (failure mode 10).
-          # Peer-to-peer Wi-Fi coverage is tier 3 (hardware lab) by design.
+          # Same-machine runs need p2p off (failure mode 10). Peer-to-peer
+          # Wi-Fi coverage is tier 3 (hardware lab) by design.
           PEERMESH_NO_P2P: "1"
       - name: Diagnostics on failure (QUIC log + crash reports)
         if: failure()
@@ -113,7 +113,7 @@ jobs:
         run: ./Scripts/e2e-cli.sh
         env:
           QUIC_DEBUG: "1"
-          # Same-machine host+joiner on an AWDL-less VM — see failure mode 10.
+          # Same-machine host+joiner — see failure mode 10.
           PEERMESH_NO_P2P: "1"
       - name: Crash backtrace on failure (joiner under lldb)
         if: failure()

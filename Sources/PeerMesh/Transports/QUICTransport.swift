@@ -95,11 +95,10 @@ public final class QUICTransport: PeerTransport, @unchecked Sendable {
     /// `false` — QUIC tests should skip cleanly and hosts should inject a
     /// `SecIdentity` via ``Configuration/tlsProvider``.
     /// Peer-to-peer Wi-Fi opt-out (`PEERMESH_NO_P2P=1`): same-machine
-    /// self-dials fail with `includePeerToPeer` enabled, and on AWDL-less VMs
-    /// (CI runners) such dials trap outright (docs/spike-results.md), so
-    /// same-machine test runs disable it. `getenv`, not `ProcessInfo`: the
-    /// latter caches the environment at first access, which silently ignores
-    /// a test's later `setenv`.
+    /// self-dials fail with `includePeerToPeer` enabled
+    /// (docs/spike-results.md), so same-machine test runs disable it.
+    /// `getenv`, not `ProcessInfo`: the latter caches the environment at
+    /// first access, which silently ignores a test's later `setenv`.
     static var peerToPeerEnabled: Bool {
         getenv("PEERMESH_NO_P2P") == nil
     }
@@ -365,8 +364,19 @@ public final class QUICTransport: PeerTransport, @unchecked Sendable {
         let localIdentity = try makeLocalIdentity(for: identity)
         let isBonjour: Bool
         if case .bonjour = configuration.discovery { isBonjour = true } else { isBonjour = false }
+
+        // Failure mode 12: pre-26 OSes trap when NWMultiplexGroup is handed a
+        // `.service` endpoint — resolve it to the concrete hostPort first.
+        // 26+ dials the service endpoint directly (the hardware-validated path).
+        var dialEndpoint = endpoint
+        if case .service = endpoint, #unavailable(macOS 26, iOS 26, macCatalyst 26) {
+            dialEndpoint = try await quicResolveServiceEndpoint(
+                endpoint,
+                includePeerToPeer: isBonjour && Self.peerToPeerEnabled,
+                queue: queue)
+        }
         return try await QUICConnection.dial(
-            to: endpoint,
+            to: dialEndpoint,
             localPeer: identity.id,
             remote: peer.id,
             localIdentity: localIdentity,
