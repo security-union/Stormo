@@ -179,3 +179,24 @@ extension ProtocolEngine {
         _ = handle(.connectionEstablished(peer))
     }
 }
+
+@Suite("PeerID and base58 (DD-8 / AWDL name-only discovery)")
+struct PeerIDIdentityTests {
+    @Test("PeerID equality is key-hash-only — display names are cosmetic")
+    func equalityIgnoresDisplayName() {
+        let hash = Data([0x12, 0x20]) + Data(repeating: 0xAB, count: 32)
+        let txtSighting = PeerID(keyHash: hash, displayName: "Dario's iPad")
+        let awdlSighting = PeerID(keyHash: hash, displayName: "Qm3vfW9…")
+        #expect(txtSighting == awdlSighting)
+        #expect(Set([txtSighting, awdlSighting]).count == 1)
+    }
+
+    @Test("base58btc round-trips a 34-byte multihash (service-name transport)")
+    func base58RoundTrip() {
+        let hash = Data([0x12, 0x20]) + Data((0..<32).map { UInt8($0 &* 7) })
+        let encoded = LibP2PIdentity.base58btc(hash)
+        #expect(encoded.count <= 63)  // Bonjour instance-name limit
+        #expect(LibP2PIdentity.base58btcDecode(encoded) == hash)
+        #expect(LibP2PIdentity.base58btcDecode("not!valid") == nil)
+    }
+}

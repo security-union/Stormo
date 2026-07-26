@@ -79,6 +79,7 @@ public final class QUICTransport: PeerTransport, @unchecked Sendable {
     // results (Bonjour TXT or rendezvous) → endpoints, keyed by PeerID, so
     // `connect(to:)` can dial a `DiscoveredPeer` that carries only id+metadata.
     private let browserBox = Locked<NWBrowser?>(nil)
+    private let txtBrowserBox = Locked<NWBrowser?>(nil)
     private let endpoints = Locked<[PeerID: NWEndpoint]>([:])
     private let seenPeers = Locked<Set<PeerID>>([])
 
@@ -155,8 +156,14 @@ public final class QUICTransport: PeerTransport, @unchecked Sendable {
 
         let listener = try NWListener(using: params)
         if isBonjour {
+            // The instance name carries the FULL base58 PeerID multihash
+            // (~47 chars, within Bonjour's 63-byte limit): plain-Bonjour
+            // browse results — the only kind that reliably surface over
+            // peer-to-peer Wi-Fi/AWDL — can then reconstruct the complete
+            // identity from the name alone, no TXT resolution required
+            // (Apple's P2P sample pattern; see docs/spike-results.md).
             listener.service = NWListener.Service(
-                name: String(identity.id.base58String.prefix(24)),
+                name: identity.id.base58String,
                 type: service.type,
                 txtRecord: makeTXTRecord(identity: identity, metadata: metadata))
         }
@@ -219,16 +226,81 @@ public final class QUICTransport: PeerTransport, @unchecked Sendable {
         }
     }
 
+    /// DUAL browse (Apple's P2P pattern + TN3213; docs/spike-results.md):
+    ///
+    /// - **plain `.bonjour`** — the browse kind that reliably surfaces over
+    ///   peer-to-peer Wi-Fi/AWDL. Result metadata is empty; the full PeerID is
+    ///   reconstructed from the service instance name (base58 multihash).
+    /// - **`.bonjourWithTXTRecord`** — richer (display name + app metadata)
+    ///   but TXT resolution is not dependable over AWDL; treated as an
+    ///   enrichment source that upgrades name-only finds via `.updated`.
+    ///
+    /// PeerID equality is key-hash-only, so both sources converge on one peer.
     private func bonjourDiscoveries(service: ServiceDescriptor) -> AsyncStream<DiscoveryEvent> {
         let (stream, continuation) = AsyncStream<DiscoveryEvent>.makeStream()
-        let params = NWParameters()
-        params.includePeerToPeer = Self.peerToPeerEnabled
-        let browser = NWBrowser(
-            for: .bonjourWithTXTRecord(type: service.type, domain: nil), using: params)
         let endpoints = self.endpoints
         let seen = self.seenPeers
+        let enriched = Locked<Set<PeerID>>([])
+        let livePlain = Locked<Set<PeerID>>([])
+        let liveTXT = Locked<Set<PeerID>>([])
 
-        browser.browseResultsChangedHandler = { results, _ in
+        @Sendable func emit(_ peer: PeerID, endpoint: NWEndpoint, metadata: [String: String], rich: Bool) {
+            endpoints.withLock { $0[peer] = endpoint }
+            let isNew = seen.withLock { set -> Bool in
+                guard !set.contains(peer) else { return false }
+                set.insert(peer); return true
+            }
+            if isNew {
+                if rich { enriched.withLock { _ = $0.insert(peer) } }
+                continuation.yield(.found(DiscoveredPeer(id: peer, metadata: metadata)))
+            } else if rich {
+                // Upgrade a name-only AWDL find with TXT display name/metadata.
+                let firstEnrichment = enriched.withLock { $0.insert(peer).inserted }
+                if firstEnrichment {
+                    continuation.yield(.updated(DiscoveredPeer(id: peer, metadata: metadata)))
+                }
+            }
+        }
+
+        @Sendable func reapLost() {
+            let union = livePlain.value.union(liveTXT.value)
+            let gone = seen.withLock { set -> [PeerID] in
+                let missing = set.subtracting(union)
+                set.subtract(missing)
+                return Array(missing)
+            }
+            for peer in gone {
+                endpoints.withLock { $0[peer] = nil }
+                enriched.withLock { _ = $0.remove(peer) }
+                continuation.yield(.lost(peer))
+            }
+        }
+
+        // Browser 1: plain .bonjour (AWDL-capable). PeerID from instance name.
+        let plainParams = NWParameters()
+        plainParams.includePeerToPeer = Self.peerToPeerEnabled
+        let plainBrowser = NWBrowser(
+            for: .bonjour(type: service.type, domain: nil), using: plainParams)
+        plainBrowser.browseResultsChangedHandler = { results, _ in
+            var live = Set<PeerID>()
+            for result in results {
+                guard
+                    case .service(let name, _, _, _) = result.endpoint,
+                    let peer = Self.peerID(fromInstanceName: name)
+                else { continue }
+                live.insert(peer)
+                emit(peer, endpoint: result.endpoint, metadata: [:], rich: false)
+            }
+            livePlain.value = live
+            reapLost()
+        }
+
+        // Browser 2: TXT-record browse (infrastructure enrichment).
+        let txtParams = NWParameters()
+        txtParams.includePeerToPeer = Self.peerToPeerEnabled
+        let txtBrowser = NWBrowser(
+            for: .bonjourWithTXTRecord(type: service.type, domain: nil), using: txtParams)
+        txtBrowser.browseResultsChangedHandler = { results, _ in
             var live = Set<PeerID>()
             for result in results {
                 guard
@@ -236,36 +308,40 @@ public final class QUICTransport: PeerTransport, @unchecked Sendable {
                     let peer = Self.peerID(fromTXT: txt)
                 else { continue }
                 live.insert(peer)
-                endpoints.withLock { $0[peer] = result.endpoint }
-                // FR-2: dedup across interfaces — emit `.found` once per PeerID.
-                let isNew = seen.withLock { set -> Bool in
-                    guard !set.contains(peer) else { return false }
-                    set.insert(peer); return true
-                }
-                if isNew {
-                    continuation.yield(.found(DiscoveredPeer(id: peer, metadata: Self.metadata(fromTXT: txt))))
-                }
+                emit(peer, endpoint: result.endpoint, metadata: Self.metadata(fromTXT: txt), rich: true)
             }
-            // Emit `.lost` for peers that disappeared from all interfaces.
-            let gone = seen.withLock { set -> [PeerID] in
-                let missing = set.subtracting(live)
-                set.subtract(missing)
-                return Array(missing)
-            }
-            for peer in gone {
-                endpoints.withLock { $0[peer] = nil }
-                continuation.yield(.lost(peer))
-            }
+            liveTXT.value = live
+            reapLost()
         }
-        browserBox.value = browser
-        continuation.onTermination = { _ in browser.cancel() }
-        browser.start(queue: queue)
+
+        browserBox.value = plainBrowser
+        txtBrowserBox.value = txtBrowser
+        continuation.onTermination = { _ in
+            plainBrowser.cancel()
+            txtBrowser.cancel()
+        }
+        plainBrowser.start(queue: queue)
+        txtBrowser.start(queue: queue)
         return stream
     }
 
     public func stopBrowsing() async {
         browserBox.value?.cancel()
         browserBox.value = nil
+        txtBrowserBox.value?.cancel()
+        txtBrowserBox.value = nil
+    }
+
+    /// Reconstruct a full PeerID from a plain-Bonjour service instance name
+    /// (the AWDL discovery path). Display name is a hash-prefix placeholder
+    /// until TXT enrichment or the PeerHello supplies the real one.
+    private static func peerID(fromInstanceName name: String) -> PeerID? {
+        guard
+            let hash = LibP2PIdentity.base58btcDecode(name),
+            hash.count == 34,
+            hash.prefix(2) == Data([0x12, 0x20])
+        else { return nil }
+        return PeerID(keyHash: hash, displayName: String(name.prefix(8)) + "…")
     }
 
     // MARK: Connecting (FR-12)
@@ -285,13 +361,16 @@ public final class QUICTransport: PeerTransport, @unchecked Sendable {
         guard let endpoint else { throw PeerMeshError.peerUnreachable(peer.id) }
 
         let localIdentity = try makeLocalIdentity(for: identity)
+        let isBonjour: Bool
+        if case .bonjour = configuration.discovery { isBonjour = true } else { isBonjour = false }
         return try await QUICConnection.dial(
             to: endpoint,
             localPeer: identity.id,
             remote: peer.id,
             localIdentity: localIdentity,
             trust: trust,
-            queue: queue)
+            queue: queue,
+            includePeerToPeer: isBonjour && Self.peerToPeerEnabled)
     }
 
     // MARK: Helpers

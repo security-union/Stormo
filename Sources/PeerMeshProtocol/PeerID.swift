@@ -12,6 +12,19 @@ import Foundation
 /// the exact byte layout. Its textual form (``base58String``) is the familiar
 /// `Qm…` PeerID string.
 public struct PeerID: Hashable, Sendable, Codable, CustomStringConvertible {
+    /// Identity IS the key: equality and hashing consider only `keyHash`.
+    /// `displayName` is cosmetic and may differ across discovery sources for
+    /// the same peer (AWDL name-only Bonjour results carry no display name
+    /// until the TXT record or PeerHello supplies it) — two sightings of one
+    /// key must always be one peer.
+    public static func == (lhs: PeerID, rhs: PeerID) -> Bool {
+        lhs.keyHash == rhs.keyHash
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(keyHash)
+    }
+
     /// libp2p multihash of the peer's P-256 public key (34 bytes: `0x12 0x20` +
     /// SHA-256 digest). See ``LibP2PIdentity`` for the layout.
     public let keyHash: Data

@@ -92,3 +92,41 @@ path blocked; steady progress cut short = timeout too tight.
    everywhere, with extract() only as the macOS 12 fallback.
 3. **MCSession.disconnect semantics** (fixed earlier same day): disconnect
    must never tear down discovery — see the re-invite regression test.
+
+## S-1 preparation: discovery audit vs Apple's P2P pattern (Jul 26 night)
+
+User report: same-Wi-Fi works device-to-device; peer-to-peer Wi-Fi (AWDL,
+no shared network) peers don't see each other. Audit vs TN3213/TicTacToe
+found three divergences, all fixed:
+
+1. **Browse kind:** we browsed `.bonjourWithTXTRecord` only; TXT resolution
+   is not dependable over AWDL. Now DUAL-browse: plain `.bonjour` (AWDL-
+   capable; PeerID reconstructed from the instance name) + TXT browse as an
+   enrichment source (`.updated` upgrades name-only finds with display
+   name/metadata). Consumers must treat `.found` and `.updated` uniformly —
+   name-only finds carry a hash-prefix placeholder name.
+2. **Instance name now carries the FULL base58 PeerID multihash** (~47
+   chars ≤ 63-byte limit) so plain-browse results yield complete identities
+   (base58 decode added to LibP2PIdentity).
+3. **Dial-side `includePeerToPeer` was never set** — Apple sets it on
+   listener, browser, AND outgoing connection. Now threaded through
+   QUICConnection.dial (bonjour mode + not opted out).
+
+Prerequisite: PeerID equality/hash is now key-hash-only (identity IS the
+key); display names are cosmetic and source-dependent. Dial adopts the
+peer's real display name from its PeerHello.
+
+Verified after changes: 54 package tests, cross-process CLI E2E, simulator
+app-loopback (1.1 s). Catalyst app-loopback currently blocked by an
+unrelated Xcode 26.6 codesign failure on freshly-copied XCUIAutomation/
+Testing frameworks (CLI xcodebuild only; appeared after a DerivedData wipe).
+AWDL itself remains hardware-only (S-1 device protocol below).
+
+**S-1 device protocol:** both phones Wi-Fi ON but forget/disconnect all
+networks (Settings→Wi-Fi, stay on the Wi-Fi screen or just unassociated);
+Bluetooth ON helps AWDL rendezvous; both apps FOREGROUND, screens on;
+launch via Xcode for QUIC_DEBUG transcripts. Expect discovery via the
+plain-Bonjour path (placeholder names possible until connect). If discovery
+works but dial fails in `waiting`, capture both transcripts — next suspects
+are QUIC-over-awdl0 binding (the core S-1 question) and iOS 26 AWDL
+teardown timing (the bug that killed MPC).

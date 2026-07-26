@@ -101,9 +101,14 @@ extension QUICSmokeTests {
         try await monitor.startBrowsing()
         var found: DiscoveredPeer?
         for await event in monitor.discoveries {
-            if case .found(let peer) = event, peer.id.displayName == "BjCamera" {
-                found = peer; break
+            // Name-only (AWDL-style) finds carry a placeholder; the real name
+            // arrives via .updated — match both (dual-browse contract).
+            switch event {
+            case .found(let peer), .updated(let peer):
+                if peer.id.displayName == "BjCamera" { found = peer }
+            case .lost: break
             }
+            if found != nil { break }
         }
         let member = try await monitor.invite(try #require(found), timeout: 15)
         #expect(member.id.displayName == "BjCamera")

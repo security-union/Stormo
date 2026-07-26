@@ -93,9 +93,14 @@ final class QUICConnection: PeerConnection, @unchecked Sendable {
         remote: PeerID,
         localIdentity: QUICLocalIdentity,
         trust: TrustPolicy,
-        queue: DispatchQueue
+        queue: DispatchQueue,
+        includePeerToPeer: Bool = false
     ) async throws -> QUICConnection {
         let params = QUICTLS.parameters(localIdentity: localIdentity, trust: trust, isListener: false)
+        // Apple sets includePeerToPeer on listener, browser, AND the outgoing
+        // connection (TN3213/TicTacToe) — without it here, an AWDL-discovered
+        // peer is unreachable even after discovery succeeds.
+        params.includePeerToPeer = includePeerToPeer
         let group = NWConnectionGroup(with: NWMultiplexGroup(to: endpoint), using: params)
         let connection = QUICConnection(
             group: group, queue: queue, localPeer: localPeer,
@@ -126,8 +131,15 @@ final class QUICConnection: PeerConnection, @unchecked Sendable {
         // Identity bootstrap: send our PeerHello (tagged control), read theirs.
         try await connection.controlWriter.send(control, tag: .control, frame: PeerHello.encode(localPeer))
         quicDebug("dial: sent hello")
-        _ = try await quicReceiveFrame(control)  // peer's PeerHello (advisory; we dialed a known id)
+        let helloFrame = try await quicReceiveFrame(control)
         quicDebug("dial: got hello")
+        // Adopt the peer's real display name: AWDL name-only discovery dials
+        // with a hash-prefix placeholder (PeerID equality is key-hash-only, so
+        // this is purely cosmetic enrichment).
+        if let hello = PeerHello.decode(helloFrame), hello.keyHash == remote.keyHash {
+            connection.remotePeerBox.value = PeerID(
+                keyHash: hello.keyHash, displayName: hello.displayName)
+        }
 
         connection.startControlReadLoop(control)
         connection.observeGroupTermination()

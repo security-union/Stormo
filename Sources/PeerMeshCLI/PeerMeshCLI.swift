@@ -122,8 +122,22 @@ struct PeerMeshCLI {
                 log("browsing for a host…")
                 var target: DiscoveredPeer?
                 for await event in session.discoveries {
-                    guard case .found(let peer) = event else { continue }
-                    log("found \(peer.id) metadata=\(peer.metadata)")
+                    // AWDL name-only finds carry a hash-prefix placeholder name;
+                    // the display name arrives via .updated (TXT enrichment) —
+                    // match on both.
+                    let peer: DiscoveredPeer?
+                    switch event {
+                    case .found(let p):
+                        log("found \(p.id) metadata=\(p.metadata)")
+                        peer = p
+                    case .updated(let p):
+                        log("updated \(p.id) metadata=\(p.metadata)")
+                        peer = p
+                    case .lost(let id):
+                        log("lost \(id)")
+                        peer = nil
+                    }
+                    guard let peer else { continue }
                     if let wanted = options["peer"], peer.id.displayName != wanted { continue }
                     target = peer
                     break

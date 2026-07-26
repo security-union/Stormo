@@ -114,4 +114,44 @@ public enum LibP2PIdentity {
         for digit in digits.reversed() { scalars.append(base58Alphabet[Int(digit)]) }
         return String(decoding: scalars, as: UTF8.self)
     }
+
+    /// Decodes base58btc back to raw bytes; `nil` on any invalid character.
+    /// Inverse of ``base58btc(_:)`` — used to recover a full PeerID multihash
+    /// from a Bonjour service instance name (AWDL name-only discovery).
+    public static func base58btcDecode(_ string: String) -> Data? {
+        guard !string.isEmpty else { return Data() }
+
+        var leadingOnes = 0
+        for scalar in string.utf8 {
+            if scalar == base58Alphabet[0] { leadingOnes += 1 } else { break }
+        }
+
+        // Big-integer base-58 → base-256 by repeated multiplication.
+        var bytes: [UInt8] = []
+        for scalar in string.utf8 {
+            guard let value = base58Reverse[scalar] else { return nil }
+            var carry = Int(value)
+            for i in 0..<bytes.count {
+                carry += Int(bytes[i]) * 58
+                bytes[i] = UInt8(carry & 0xFF)
+                carry >>= 8
+            }
+            while carry > 0 {
+                bytes.append(UInt8(carry & 0xFF))
+                carry >>= 8
+            }
+        }
+
+        var out = Data(repeating: 0, count: leadingOnes)
+        out.append(contentsOf: bytes.reversed())
+        return out
+    }
+
+    private static let base58Reverse: [UInt8: UInt8] = {
+        var map: [UInt8: UInt8] = [:]
+        for (index, scalar) in base58Alphabet.enumerated() {
+            map[scalar] = UInt8(index)
+        }
+        return map
+    }()
 }
