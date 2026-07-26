@@ -47,6 +47,11 @@ let package = Package(
             dependencies: [
                 "PeerMeshProtocol",
                 .product(name: "X509", package: "swift-certificates"),
+                // The QUIC driver serializes the DD-7 `StreamHeader` prologue of
+                // every dedicated stream (the generated FlatBuffers type lives in
+                // PeerMeshProtocol). Moving bytes onto the wire is driver work
+                // (DD-6); no protocol decisions live here.
+                .product(name: "FlatBuffers", package: "flatbuffers"),
             ]
         ),
         .target(name: "MPCCompat", dependencies: ["PeerMesh"]),
