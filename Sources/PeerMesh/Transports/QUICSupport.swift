@@ -14,7 +14,7 @@ import Security
 
 /// Driver-internal failures for the QUIC transport (DD-1). None of these are
 /// protocol decisions (DD-6) — they describe transport plumbing outcomes.
-enum QUICError: Error, Sendable {
+enum QUICError: Error, Sendable, LocalizedError {
     /// The secured connection ended before the expected bytes arrived.
     case connectionClosed
     /// A framed read hit EOF/FIN mid-frame.
@@ -27,6 +27,21 @@ enum QUICError: Error, Sendable {
     /// A dedicated stream announced a malformed `StreamHeader` (DD-5 discipline).
     case malformedStreamHeader
     case listenerFailed(String)
+
+    // NSError bridging renumbers payload cases (tlsIdentityUnavailable
+    // surfaces as "error 0"), hiding the diagnostic string entirely —
+    // LocalizedError puts the actual reason in localizedDescription.
+    var errorDescription: String? {
+        switch self {
+        case .connectionClosed: return "PeerMesh QUIC: connection closed"
+        case .shortRead: return "PeerMesh QUIC: stream ended mid-frame"
+        case .identityMismatch: return "PeerMesh QUIC: peer key hash does not match its certificate"
+        case .tlsIdentityUnavailable(let reason):
+            return "PeerMesh QUIC: no local TLS identity — \(reason)"
+        case .malformedStreamHeader: return "PeerMesh QUIC: malformed stream header"
+        case .listenerFailed(let reason): return "PeerMesh QUIC: listener failed — \(reason)"
+        }
+    }
 }
 
 #if canImport(Network) && canImport(Security)
@@ -34,14 +49,17 @@ enum QUICError: Error, Sendable {
 // MARK: - Debug logging (temporary; env-gated)
 
 let quicDebugEnabled = ProcessInfo.processInfo.environment["QUIC_DEBUG"] != nil
+let quicDebugLogPath = ProcessInfo.processInfo.environment["QUIC_DEBUG_LOG"]
 func quicDebug(_ s: @autoclosure () -> String) {
     guard quicDebugEnabled else { return }
-    let line = "\(Date().timeIntervalSince1970) [drv] \(s())\n"
-    let url = URL(fileURLWithPath: "/private/tmp/claude-501/-Users-darioalessandro-Documents-multipeer-connectivity/2401fce3-1214-4515-9cbb-686ff2125601/scratchpad/phases.log")
+    let line = "\(Date().timeIntervalSince1970) [drv] \(s())"
+    print(line)  // stdout: visible in xcodebuild/console even when sandboxed
+    guard let path = quicDebugLogPath else { return }
+    let url = URL(fileURLWithPath: path)
     if let h = try? FileHandle(forWritingTo: url) {
-        h.seekToEndOfFile(); h.write(Data(line.utf8)); try? h.close()
+        h.seekToEndOfFile(); h.write(Data((line + "\n").utf8)); try? h.close()
     } else {
-        try? Data(line.utf8).write(to: url)
+        try? Data((line + "\n").utf8).write(to: url)
     }
 }
 

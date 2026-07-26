@@ -65,18 +65,31 @@ enum QUICTLS {
     ///    `tlsProvider`, or skip the QUIC test cleanly).
     static func makeLocalIdentity(for identity: PeerIdentity) throws -> QUICLocalIdentity {
         // Path 1: entitled data-protection keychain.
-        if let sec = try? IdentityCertificate.makeSecIdentity(for: identity),
-           let secIdentity = sec_identity_create(sec) {
-            return QUICLocalIdentity(secIdentity: secIdentity)
+        let path1Error: String
+        do {
+            let sec = try IdentityCertificate.makeSecIdentity(for: identity)
+            if let secIdentity = sec_identity_create(sec) {
+                return QUICLocalIdentity(secIdentity: secIdentity)
+            }
+            path1Error = "sec_identity_create returned nil"
+        } catch {
+            path1Error = "keychain path: \(error)"
         }
 
         #if os(macOS)
-        // Path 2: transient file keychain (entitlement-free).
-        return try makeFileKeychainIdentity(for: identity)
+        // Path 2: transient file keychain (entitlement-free; SecKeychain API is
+        // unavailable on Catalyst and iOS — those platforms must succeed on path 1
+        // or inject Configuration.tlsProvider).
+        do {
+            return try makeFileKeychainIdentity(for: identity)
+        } catch {
+            throw QUICError.tlsIdentityUnavailable(
+                "path1 [\(path1Error)]; path2 [\(error)]")
+        }
         #else
-        // Path 3: no entitlement-free route on non-macOS from a bare test.
+        // Path 3: no entitlement-free route on iOS/tvOS/Catalyst from a bare process.
         throw QUICError.tlsIdentityUnavailable(
-            "no keychain entitlement; supply Configuration.tlsProvider")
+            "path1 [\(path1Error)]; no fallback on this platform — supply Configuration.tlsProvider")
         #endif
     }
 

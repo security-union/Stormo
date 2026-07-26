@@ -99,6 +99,19 @@ public final class QUICTransport: PeerTransport, @unchecked Sendable {
         return true
     }
 
+    /// Human-readable outcome of attempting to form the local TLS identity —
+    /// "OK", or the failure reason (per resolution path). For diagnostics and
+    /// test-skip messages; the boolean twin is ``isTLSIdentityAvailable(for:)``.
+    public static func tlsIdentityDiagnostic(for identity: PeerIdentity) -> String {
+        do {
+            let local = try QUICTLS.makeLocalIdentity(for: identity)
+            local.dispose()
+            return "OK"
+        } catch {
+            return error.localizedDescription
+        }
+    }
+
     // MARK: Advertising (FR-1, FR-3, FR-5)
 
     public func startAdvertising(
