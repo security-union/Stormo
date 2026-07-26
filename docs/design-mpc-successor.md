@@ -154,13 +154,13 @@ sequenceDiagram
     B->>A: Signal.Invite { peer_id, context, protocol_version } (FlatBuffers, verified read)
     A->>A: App callback: invitation + inviter identity hash (FR-22)
     alt pairing code verification
-        Note over B,A: Both derive 6-digit code from TLS exporter secret<br/>binding both certificates; users compare/enter code
+        Note over B,A: Both derive 6-digit code from TLS exporter secret<br/>binding both certificates — users compare/enter code
         B-->>A: Signal.CodeConfirm { transcript MAC }
         A-->>B: Signal.CodeConfirm { transcript MAC }
     end
     alt accepted
         A->>B: Signal.InviteResponse { accepted, roster }
-        Note over B,A: B admitted; roster gossip to all members (FR-13)
+        Note over B,A: B admitted — roster gossip to all members (FR-13)
     else declined / timeout (FR-9)
         A->>B: Signal.InviteResponse { declined }
         Note over B,A: Connection closed, half-open state cleaned up
@@ -336,12 +336,12 @@ sequenceDiagram
     EA-->>DA: Effect.sendData(payload, to: B, .reliable)
     Note over EA: Engine resolved recipients against the roster —<br/>pure decision, no I/O (DD-6)
     DA->>DB: NEW unidirectional QUIC stream:<br/>StreamHeader{kind: message} + payload + FIN
-    Note over DA,DB: One stream per message (DD-7): a lost packet of<br/>message 1 never delays message 2; cancel = RESET_STREAM
+    Note over DA,DB: One stream per message (DD-7): a lost packet of<br/>message 1 never delays message 2 — cancel = RESET_STREAM
     DB->>DB: read verified StreamHeader, read payload to FIN
     DB->>EB: Input.dataReceived(payload, from: A, .reliable)
     EB-->>AppB: emit .messageReceived (membership-gated)
 
-    alt .reliableOrdered (MPC parity; MPCCompat default)
+    alt .reliableOrdered (MPC parity — MPCCompat default)
         DA->>DB: StreamHeader{kind: orderedMessage, sequence: n} + payload + FIN
         DB->>DB: reorder buffer: release in sequence order
     else .datagram (FR-16)
@@ -366,8 +366,8 @@ sequenceDiagram
     DB->>EB: Input.signal(transferOffer, from: A)
     EB-->>AppB: emit .resourceOffered(name, Progress)
     DA->>DB: NEW unidirectional stream: StreamHeader{kind: transferChunk,<br/>transfer_id} + chunked file bytes … FIN
-    Note over DA,DB: Disk-to-disk streaming, bounded memory (QA-3);<br/>QUIC per-stream flow control IS the back-pressure;<br/>bulk bytes never touch the control or message streams (QA-4)
-    DB-->>AppB: Progress updates; temp file assembled
+    Note over DA,DB: Disk-to-disk streaming, bounded memory (QA-3) —<br/>QUIC per-stream flow control IS the back-pressure —<br/>bulk bytes never touch the control or message streams (QA-4)
+    DB-->>AppB: Progress updates — temp file assembled
     DB->>EB: transfer complete
     EB-->>AppB: emit .resourceReceived(name, localURL)
 
