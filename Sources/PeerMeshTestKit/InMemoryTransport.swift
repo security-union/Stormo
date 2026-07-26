@@ -130,8 +130,10 @@ final class InMemoryConnection: PeerConnection, @unchecked Sendable {
     let remotePeer: PeerID
     let remoteKeyHash: Data
     let events: AsyncStream<PeerConnectionEvent>
+    let incomingStreams: AsyncStream<(StreamHeaderInfo, any PeerByteStream)>
 
     private let ownContinuation: AsyncStream<PeerConnectionEvent>.Continuation
+    private let incomingStreamsContinuation: AsyncStream<(StreamHeaderInfo, any PeerByteStream)>.Continuation
     private let partnerBox = Locked<InMemoryConnection?>(nil)
     private let closed = Locked<Bool>(false)
 
@@ -139,6 +141,7 @@ final class InMemoryConnection: PeerConnection, @unchecked Sendable {
         self.remotePeer = remote.id
         self.remoteKeyHash = remote.id.keyHash
         (self.events, self.ownContinuation) = AsyncStream.makeStream()
+        (self.incomingStreams, self.incomingStreamsContinuation) = AsyncStream.makeStream()
     }
 
     static func pair(
@@ -158,11 +161,22 @@ final class InMemoryConnection: PeerConnection, @unchecked Sendable {
         partner.ownContinuation.yield(.signal(bytes))
     }
 
-    func sendData(_ payload: Data, delivery: Delivery) async throws {
+    func sendData(_ payload: Data, delivery: Delivery, sequence: UInt64?) async throws {
         guard !closed.value, let partner = partnerBox.value else {
             throw PeerMeshError.peerUnreachable(remotePeer)
         }
-        partner.ownContinuation.yield(.data(payload, delivery))
+        partner.ownContinuation.yield(.data(payload, delivery, sequence: sequence))
+    }
+
+    func openOutgoingStream(header: StreamHeaderInfo) async throws -> any PeerByteStream {
+        guard !closed.value, let partner = partnerBox.value else {
+            throw PeerMeshError.peerUnreachable(remotePeer)
+        }
+        // The dedicated stream is a paired byte pipe; the writer stays local,
+        // the reader surfaces on the partner's incomingStreams (with the header).
+        let (writerEnd, readerEnd) = InMemoryByteStream.pair(label: header.label ?? "")
+        partner.incomingStreamsContinuation.yield((header, readerEnd))
+        return writerEnd
     }
 
     func close() async {
@@ -171,10 +185,167 @@ final class InMemoryConnection: PeerConnection, @unchecked Sendable {
         if let partner = partnerBox.value {
             partner.ownContinuation.yield(.closed)
             partner.ownContinuation.finish()
+            partner.incomingStreamsContinuation.finish()
         }
         ownContinuation.finish()
+        incomingStreamsContinuation.finish()
         partnerBox.value = nil
     }
+}
+
+// MARK: - In-memory byte stream pair (FR-17 / FR-18)
+
+/// One end of a dedicated byte stream. `write` yields to the partner's
+/// `incoming`; `finish` FINs it. Back-pressure is API-shaped (writes are
+/// `async` and cancellation-aware); the in-memory buffer itself is unbounded.
+final class InMemoryByteStream: PeerByteStream, @unchecked Sendable {
+    let label: String
+    let incoming: AsyncThrowingStream<Data, Error>
+
+    private let incomingContinuation: AsyncThrowingStream<Data, Error>.Continuation
+    private let partnerBox = Locked<InMemoryByteStream?>(nil)
+    private let finished = Locked<Bool>(false)
+
+    private init(label: String) {
+        self.label = label
+        (self.incoming, self.incomingContinuation) = AsyncThrowingStream.makeStream()
+    }
+
+    static func pair(label: String) -> (writerEnd: InMemoryByteStream, readerEnd: InMemoryByteStream) {
+        let a = InMemoryByteStream(label: label)
+        let b = InMemoryByteStream(label: label)
+        a.partnerBox.value = b
+        b.partnerBox.value = a
+        return (a, b)
+    }
+
+    func write(_ data: Data) async throws {
+        guard !finished.value, let partner = partnerBox.value else {
+            throw PeerMeshError.resourceTransferIncomplete
+        }
+        partner.incomingContinuation.yield(data)
+    }
+
+    func finish() async {
+        guard !finished.value else { return }
+        finished.value = true
+        partnerBox.value?.incomingContinuation.finish()  // FIN delimits the payload
+        partnerBox.value = nil
+    }
+}
+
+// MARK: - Reordering decorator (test-only)
+
+/// Wraps any `PeerTransport` and deliberately **reorders application data**
+/// events on delivery, to prove ordered delivery (DD-7) works. Control signals
+/// and dedicated streams pass through untouched (only `.data` events are
+/// shuffled). Consecutive data messages are delivered with alternating delays
+/// so adjacent messages swap: `.reliableOrdered` is put back in order by the
+/// runtime's reorder buffer, while plain `.reliable` surfaces out of order.
+public final class ReorderingTransport: PeerTransport, @unchecked Sendable {
+    private let base: any PeerTransport
+    private let longDelay: UInt64
+    private let shortDelay: UInt64
+    public let inboundConnections: AsyncStream<any PeerConnection>
+
+    /// - Parameters:
+    ///   - base: the transport whose deliveries are reordered.
+    ///   - longDelayNanos/shortDelayNanos: alternating per-message delays; the
+    ///     gap between them must dominate inter-arrival jitter for a reliable swap.
+    public init(
+        base: any PeerTransport,
+        longDelayNanos: UInt64 = 80_000_000,
+        shortDelayNanos: UInt64 = 5_000_000
+    ) {
+        self.base = base
+        self.longDelay = longDelayNanos
+        self.shortDelay = shortDelayNanos
+        let (stream, continuation) = AsyncStream<any PeerConnection>.makeStream()
+        self.inboundConnections = stream
+        let long = longDelayNanos
+        let short = shortDelayNanos
+        let baseInbound = base.inboundConnections
+        Task {
+            for await connection in baseInbound {
+                continuation.yield(ReorderingConnection(
+                    base: connection, longDelay: long, shortDelay: short))
+            }
+            continuation.finish()
+        }
+    }
+
+    public func startAdvertising(
+        service: ServiceDescriptor, metadata: [String: String], identity: PeerIdentity
+    ) async throws {
+        try await base.startAdvertising(service: service, metadata: metadata, identity: identity)
+    }
+
+    public func stopAdvertising() async { await base.stopAdvertising() }
+
+    public func discoveries(service: ServiceDescriptor) async throws -> AsyncStream<DiscoveryEvent> {
+        try await base.discoveries(service: service)
+    }
+
+    public func stopBrowsing() async { await base.stopBrowsing() }
+
+    public func connect(
+        to peer: DiscoveredPeer, identity: PeerIdentity, trust: TrustPolicy
+    ) async throws -> any PeerConnection {
+        let connection = try await base.connect(to: peer, identity: identity, trust: trust)
+        return ReorderingConnection(base: connection, longDelay: longDelay, shortDelay: shortDelay)
+    }
+}
+
+final class ReorderingConnection: PeerConnection, @unchecked Sendable {
+    private let base: any PeerConnection
+    let events: AsyncStream<PeerConnectionEvent>
+
+    var remotePeer: PeerID { base.remotePeer }
+    var remoteKeyHash: Data { base.remoteKeyHash }
+    var incomingStreams: AsyncStream<(StreamHeaderInfo, any PeerByteStream)> { base.incomingStreams }
+
+    init(base: any PeerConnection, longDelay: UInt64, shortDelay: UInt64) {
+        self.base = base
+        let (stream, continuation) = AsyncStream<PeerConnectionEvent>.makeStream()
+        self.events = stream
+        let baseEvents = base.events
+        Task {
+            var dataIndex = 0
+            var pending: [Task<Void, Never>] = []
+            for await event in baseEvents {
+                switch event {
+                case .data:
+                    let delay = (dataIndex % 2 == 0) ? longDelay : shortDelay
+                    dataIndex += 1
+                    pending.append(Task {
+                        try? await Task.sleep(nanoseconds: delay)
+                        continuation.yield(event)
+                    })
+                case .signal:
+                    continuation.yield(event)  // control order preserved
+                case .closed:
+                    for task in pending { await task.value }
+                    continuation.yield(.closed)
+                    continuation.finish()
+                    return
+                }
+            }
+            for task in pending { await task.value }
+            continuation.finish()
+        }
+    }
+
+    func sendSignal(_ bytes: Data) async throws { try await base.sendSignal(bytes) }
+
+    func sendData(_ payload: Data, delivery: Delivery, sequence: UInt64?) async throws {
+        try await base.sendData(payload, delivery: delivery, sequence: sequence)
+    }
+
+    func openOutgoingStream(header: StreamHeaderInfo) async throws -> any PeerByteStream {
+        try await base.openOutgoingStream(header: header)
+    }
+
+    func close() async { await base.close() }
 }
 
 /// Minimal lock box for transport-internal state.

@@ -43,10 +43,54 @@ public enum PeerConnectionEvent: Sendable {
     /// Encoded control-plane signal (control stream, DD-5). The runtime
     /// decodes via ``SignalCodec`` and feeds the engine.
     case signal(Data)
-    /// Application data (per-message stream or datagram, DD-7).
-    case data(Data, Delivery)
+    /// Application data (per-message stream or datagram, DD-7). For
+    /// `.reliableOrdered` the sender's `StreamHeader.sequence` travels with the
+    /// payload (`sequence`); the runtime's per-peer reorder buffer releases in
+    /// order. `.reliable`/`.datagram` carry `nil`.
+    case data(Data, Delivery, sequence: UInt64?)
     /// The connection ended (peer closed, reset, or transport failure).
     case closed
+}
+
+/// In-memory mirror of `Schemas/stream_header.fbs` (DD-7). Every dedicated
+/// (non-control) stream is announced with one of these. The QUIC driver
+/// serializes it as the size-prefixed FlatBuffers `StreamHeader` prologue of
+/// the stream; the InMemory driver passes the struct through directly.
+///
+/// Field mapping to `stream_header.fbs`:
+/// `kind` ↔ `StreamKind`, `sequence` ↔ `sequence`, `transferID` ↔ 16-byte
+/// `transfer_id`, `label` ↔ `label`.
+public struct StreamHeaderInfo: Sendable, Equatable {
+    public enum Kind: Sendable, Equatable {
+        /// `StreamKind.Message` — reliable message, unordered (FR-15).
+        case message
+        /// `StreamKind.OrderedMessage` — reliable FIFO message (FR-15).
+        case orderedMessage
+        /// `StreamKind.TransferChunk` — resource-transfer stream (FR-17).
+        case transferChunk
+        /// `StreamKind.AppStream` — application byte stream (FR-18).
+        case appStream
+    }
+
+    public var kind: Kind
+    /// FIFO sequence, meaningful for `.orderedMessage`.
+    public var sequence: UInt64?
+    /// Pairs a `.transferChunk` stream with its `TransferOffer` signal.
+    public var transferID: UUID?
+    /// Stream label, meaningful for `.appStream`.
+    public var label: String?
+
+    public init(
+        kind: Kind,
+        sequence: UInt64? = nil,
+        transferID: UUID? = nil,
+        label: String? = nil
+    ) {
+        self.kind = kind
+        self.sequence = sequence
+        self.transferID = transferID
+        self.label = label
+    }
 }
 
 /// A single secured peer-pair connection. One per pair (FR-12); all session
@@ -64,14 +108,34 @@ public protocol PeerConnection: Sendable {
     /// Send an encoded signal on the control stream (ordered, DD-5).
     func sendSignal(_ bytes: Data) async throws
     /// Send application data (DD-7: `.reliable`/`.reliableOrdered` = own
-    /// stream; `.datagram` = QUIC datagram).
-    func sendData(_ payload: Data, delivery: Delivery) async throws
+    /// stream; `.datagram` = QUIC datagram). For `.reliableOrdered` the runtime
+    /// supplies the per-peer `sequence` that becomes `StreamHeader.sequence`;
+    /// `.reliable`/`.datagram` pass `nil`.
+    func sendData(_ payload: Data, delivery: Delivery, sequence: UInt64?) async throws
+
+    /// Open a dedicated outgoing stream (FR-17 resource transfer, FR-18 app
+    /// byte streams). `header` becomes the stream's `StreamHeader` prologue on
+    /// QUIC (DD-7); the returned writer streams the payload with back-pressure.
+    func openOutgoingStream(header: StreamHeaderInfo) async throws -> any PeerByteStream
+
+    /// Dedicated streams opened by the remote peer, paired with the decoded
+    /// `StreamHeader` that introduced them (FR-17, FR-18).
+    var incomingStreams: AsyncStream<(StreamHeaderInfo, any PeerByteStream)> { get }
 
     func close() async
 }
 
+extension PeerConnection {
+    /// Convenience for callers that don't carry an ordering sequence
+    /// (`.reliable` / `.datagram`).
+    public func sendData(_ payload: Data, delivery: Delivery) async throws {
+        try await sendData(payload, delivery: delivery, sequence: nil)
+    }
+}
+
 /// A dedicated bidirectional byte stream with explicit back-pressure (FR-18).
-/// TODO(Phase 2): opened via the connection once transfer/stream signaling lands.
+/// Opened via ``PeerConnection/openOutgoingStream(header:)``; the remote peer
+/// receives it on ``PeerConnection/incomingStreams``.
 public protocol PeerByteStream: Sendable {
     var label: String { get }
     func write(_ data: Data) async throws

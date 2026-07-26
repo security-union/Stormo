@@ -31,21 +31,50 @@ public actor PeerSession {
     nonisolated public let invitations: AsyncStream<Invitation>
     nonisolated public let membership: AsyncStream<MembershipEvent>
     nonisolated public let messages: AsyncStream<InboundMessage>
+    /// Incoming resource transfers (FR-17): `.started` / `.finished` / `.failed`,
+    /// mirroring MPC's `didStartReceivingResource` / `didFinishReceivingResource`.
+    nonisolated public let resources: AsyncStream<ResourceEvent>
+    /// Application byte streams opened by remote peers (FR-18).
+    nonisolated public let incomingStreams: AsyncStream<(label: String, from: PeerID, stream: any PeerByteStream)>
 
     private let discoveriesContinuation: AsyncStream<DiscoveryEvent>.Continuation
     private let invitationsContinuation: AsyncStream<Invitation>.Continuation
     private let membershipContinuation: AsyncStream<MembershipEvent>.Continuation
     private let messagesContinuation: AsyncStream<InboundMessage>.Continuation
+    private let resourcesContinuation: AsyncStream<ResourceEvent>.Continuation
+    private let incomingStreamsContinuation: AsyncStream<(label: String, from: PeerID, stream: any PeerByteStream)>.Continuation
 
     // MARK: Runtime state (driver bookkeeping only — no protocol decisions)
 
     private var connections: [PeerID: any PeerConnection] = [:]
     private var receiveTasks: [PeerID: Task<Void, Never>] = [:]
+    private var streamTasks: [PeerID: Task<Void, Never>] = [:]
     private var timers: [ProtocolEngine.TimerKey: Task<Void, Never>] = [:]
     private var knownEndpoints: [PeerID: DiscoveredPeer] = [:]
     private var inviteWaiters: [PeerID: CheckedContinuation<SessionPeer, Error>] = [:]
     private var inboundTask: Task<Void, Never>?
     private var browseTask: Task<Void, Never>?
+
+    // Ordered delivery (DD-7). Outbound: a per-peer sequence counter stamped on
+    // `.reliableOrdered` sends. Inbound: a per-peer reorder buffer that releases
+    // strictly in sequence order. Reliable transport never loses, so the buffer
+    // only absorbs reordering; overflow past the cap is connection-fatal.
+    private var outboundSequence: [PeerID: UInt64] = [:]
+    private var expectedInboundSequence: [PeerID: UInt64] = [:]
+    private var reorderBuffer: [PeerID: [UInt64: Data]] = [:]
+    private let reorderBufferCap = 4096
+
+    // Resource-transfer matching (FR-17): a `transferChunk` stream is paired to
+    // its `TransferOffer` by transfer id; either may arrive first.
+    private var pendingOffers: [UUID: (name: String, totalBytes: UInt64, from: PeerID)] = [:]
+    private var pendingChunkStreams: [UUID: any PeerByteStream] = [:]
+
+    // App-byte-stream matching (FR-18): an `appStream` is paired to its
+    // `StreamOpen` announcement by label (FIFO per peer).
+    private var pendingStreamOpens: [PeerID: [String]] = [:]
+    private var pendingAppStreams: [PeerID: [(label: String, stream: any PeerByteStream)]] = [:]
+
+    private static let resourceChunkSize = 256 * 1024
 
     // MARK: Construction
 
@@ -86,6 +115,8 @@ public actor PeerSession {
         (self.invitations, self.invitationsContinuation) = AsyncStream.makeStream()
         (self.membership, self.membershipContinuation) = AsyncStream.makeStream()
         (self.messages, self.messagesContinuation) = AsyncStream.makeStream()
+        (self.resources, self.resourcesContinuation) = AsyncStream.makeStream()
+        (self.incomingStreams, self.incomingStreamsContinuation) = AsyncStream.makeStream()
     }
 
     // MARK: Discovery and advertising (FR-1..FR-5)
@@ -155,16 +186,45 @@ public actor PeerSession {
     }
 
     /// Transfer a file to a peer on a dedicated stream, disk-to-disk, with
-    /// bounded memory (FR-17, QA-3).
+    /// bounded memory (FR-17, QA-3). Announces the transfer on the control
+    /// stream (`TransferOffer`), then streams the file in 256 KB chunks on a
+    /// dedicated `transferChunk` stream. Cancel via ``ResourceTransfer/progress``.
     public func sendResource(at url: URL, to peer: PeerID) async throws -> ResourceTransfer {
-        // TODO(Step 4): TransferOffer signal + transferChunk stream (DD-7).
-        throw PeerMeshError.unimplemented("sendResource")
+        guard engine.members.contains(peer), let connection = connections[peer] else {
+            throw PeerMeshError.peerUnreachable(peer)
+        }
+        let attributes = try FileManager.default.attributesOfItem(atPath: url.path)
+        let totalBytes = (attributes[.size] as? NSNumber)?.uint64Value ?? 0
+        let name = url.lastPathComponent
+        let id = UUID()
+
+        let progress = Progress(totalUnitCount: Int64(totalBytes))
+        progress.isCancellable = true
+
+        // Announce on the control stream (FR-17); the receiver's engine emits
+        // `.transferOffered` and pairs it with the chunk stream by `id`.
+        try await connection.sendSignal(
+            SignalCodec.encode(.transferOffer(id: id, name: name, totalBytes: totalBytes)))
+
+        let writer = try await connection.openOutgoingStream(
+            header: StreamHeaderInfo(kind: .transferChunk, transferID: id))
+
+        Task.detached {
+            await Self.streamResource(
+                from: url, to: writer, chunkSize: Self.resourceChunkSize, progress: progress)
+        }
+        return ResourceTransfer(id: id, progress: progress)
     }
 
-    /// Open a named bidirectional byte stream with a peer (FR-18).
+    /// Open a named bidirectional byte stream with a peer (FR-18). Announces it
+    /// on the control stream (`StreamOpen`), then opens the dedicated `appStream`.
     public func openStream(_ label: String, with peer: PeerID) async throws -> any PeerByteStream {
-        // TODO(Step 4): StreamOpen signal + appStream stream (DD-7).
-        throw PeerMeshError.unimplemented("openStream")
+        guard engine.members.contains(peer), let connection = connections[peer] else {
+            throw PeerMeshError.peerUnreachable(peer)
+        }
+        try await connection.sendSignal(SignalCodec.encode(.streamOpen(label: label)))
+        return try await connection.openOutgoingStream(
+            header: StreamHeaderInfo(kind: .appStream, label: label))
     }
 
     /// Currently admitted session members (excluding the local peer).
@@ -178,8 +238,10 @@ public actor PeerSession {
         inboundTask?.cancel()
         browseTask?.cancel()
         for task in receiveTasks.values { task.cancel() }
+        for task in streamTasks.values { task.cancel() }
         for timer in timers.values { timer.cancel() }
         receiveTasks.removeAll()
+        streamTasks.removeAll()
         timers.removeAll()
         await transport.stopAdvertising()
         await transport.stopBrowsing()
@@ -187,6 +249,8 @@ public actor PeerSession {
         invitationsContinuation.finish()
         membershipContinuation.finish()
         messagesContinuation.finish()
+        resourcesContinuation.finish()
+        incomingStreamsContinuation.finish()
     }
 
     // MARK: - Engine loop (the sans-I/O boundary, DD-6)
@@ -225,7 +289,18 @@ public actor PeerSession {
 
         case .sendData(let payload, let peer, let delivery):
             guard let connection = connections[peer] else { return }
-            Task { try? await connection.sendData(payload, delivery: delivery) }
+            // Assign the per-peer FIFO sequence synchronously (in send order)
+            // for `.reliableOrdered`; it rides with the payload as
+            // `StreamHeader.sequence` (DD-7). Plain reliable/datagram carry nil.
+            let sequence: UInt64?
+            if delivery == .reliableOrdered {
+                let next = outboundSequence[peer, default: 0]
+                outboundSequence[peer] = next + 1
+                sequence = next
+            } else {
+                sequence = nil
+            }
+            Task { try? await connection.sendData(payload, delivery: delivery, sequence: sequence) }
 
         case .startTimer(let key, let duration):
             timers[key]?.cancel()
@@ -239,8 +314,8 @@ public actor PeerSession {
             timers.removeValue(forKey: key)?.cancel()
 
         case .closeConnection(let peer):
-            let connection = connections.removeValue(forKey: peer)
-            receiveTasks.removeValue(forKey: peer)?.cancel()
+            let connection = connections[peer]
+            forgetConnection(peer)
             Task { await connection?.close() }
 
         case .emit(let event):
@@ -280,6 +355,124 @@ public actor PeerSession {
         case .messageReceived(let payload, let sender, let delivery):
             messagesContinuation.yield(
                 InboundMessage(sender: sender, payload: payload, delivery: delivery))
+
+        case .transferOffered(let id, let name, let totalBytes, let from):
+            pendingOffers[id] = (name: name, totalBytes: totalBytes, from: from)
+            matchTransfer(id)
+
+        case .streamOpened(let label, let from):
+            pendingStreamOpens[from, default: []].append(label)
+            matchAppStream(from)
+        }
+    }
+
+    // MARK: - Resource transfer & app streams (FR-17, FR-18)
+
+    /// Pairs a `transferChunk` stream with its `TransferOffer` and, once both
+    /// are present, starts the disk-to-disk receive (bounded memory, QA-3).
+    private func matchTransfer(_ id: UUID) {
+        guard let offer = pendingOffers[id], let stream = pendingChunkStreams[id] else { return }
+        pendingOffers.removeValue(forKey: id)
+        pendingChunkStreams.removeValue(forKey: id)
+
+        let progress = Progress(totalUnitCount: Int64(offer.totalBytes))
+        progress.isCancellable = true
+        resourcesContinuation.yield(.started(name: offer.name, from: offer.from, progress: progress))
+
+        let continuation = resourcesContinuation
+        Task.detached {
+            await Self.receiveResource(
+                stream: stream, name: offer.name, from: offer.from,
+                totalBytes: offer.totalBytes, progress: progress, into: continuation)
+        }
+    }
+
+    /// Surfaces an `appStream` once its `StreamOpen` announcement (membership-
+    /// gated by the engine) has also arrived (FR-18).
+    private func matchAppStream(_ peer: PeerID) {
+        guard var opens = pendingStreamOpens[peer], var streams = pendingAppStreams[peer] else {
+            return
+        }
+        var index = 0
+        while index < streams.count {
+            if let openIndex = opens.firstIndex(of: streams[index].label) {
+                opens.remove(at: openIndex)
+                let matched = streams.remove(at: index)
+                incomingStreamsContinuation.yield((label: matched.label, from: peer, stream: matched.stream))
+            } else {
+                index += 1
+            }
+        }
+        pendingStreamOpens[peer] = opens.isEmpty ? nil : opens
+        pendingAppStreams[peer] = streams.isEmpty ? nil : streams
+    }
+
+    /// Streams a file to a peer in fixed-size chunks (sender side, QA-3).
+    /// Cancellation (`Progress.cancel()`) stops early and FINs the stream, which
+    /// the receiver detects as an incomplete transfer.
+    private static func streamResource(
+        from url: URL,
+        to writer: any PeerByteStream,
+        chunkSize: Int,
+        progress: Progress
+    ) async {
+        guard let handle = try? FileHandle(forReadingFrom: url) else {
+            await writer.finish()
+            return
+        }
+        defer { try? handle.close() }
+        while !progress.isCancelled {
+            let chunk = (try? handle.read(upToCount: chunkSize)) ?? nil
+            guard let chunk, !chunk.isEmpty else { break }
+            do {
+                try await writer.write(chunk)
+            } catch {
+                break
+            }
+            progress.completedUnitCount += Int64(chunk.count)
+        }
+        await writer.finish()
+    }
+
+    /// Receives a transfer disk-to-disk into a temp file (receiver side, QA-3),
+    /// surfacing `.finished` on completion or `.failed` on cancellation/loss.
+    private static func receiveResource(
+        stream: any PeerByteStream,
+        name: String,
+        from: PeerID,
+        totalBytes: UInt64,
+        progress: Progress,
+        into continuation: AsyncStream<ResourceEvent>.Continuation
+    ) async {
+        let tempURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("\(UUID().uuidString)-\(name)")
+        FileManager.default.createFile(atPath: tempURL.path, contents: nil)
+        guard let handle = try? FileHandle(forWritingTo: tempURL) else {
+            continuation.yield(.failed(name: name, from: from, error: PeerMeshError.resourceTransferIncomplete))
+            return
+        }
+
+        var received: UInt64 = 0
+        var failure: Error?
+        do {
+            for try await chunk in stream.incoming {
+                if progress.isCancelled { break }
+                try handle.write(contentsOf: chunk)
+                received += UInt64(chunk.count)
+                progress.completedUnitCount = Int64(received)
+            }
+        } catch {
+            failure = error
+        }
+        try? handle.close()
+
+        if failure == nil, !progress.isCancelled, received == totalBytes {
+            continuation.yield(.finished(name: name, from: from, at: tempURL))
+        } else {
+            try? FileManager.default.removeItem(at: tempURL)
+            continuation.yield(.failed(
+                name: name, from: from,
+                error: failure ?? PeerMeshError.resourceTransferIncomplete))
         }
     }
 
@@ -292,6 +485,12 @@ public actor PeerSession {
         receiveTasks[peer] = Task { [weak self] in
             for await event in events {
                 await self?.handleConnectionEvent(event, from: peer)
+            }
+        }
+        let streams = connection.incomingStreams
+        streamTasks[peer] = Task { [weak self] in
+            for await (header, stream) in streams {
+                await self?.handleIncomingStream(header, stream, from: peer)
             }
         }
         run(.connectionEstablished(peer))
@@ -308,13 +507,71 @@ public actor PeerSession {
                 execute(.closeConnection(peer))
                 run(.connectionClosed(peer))
             }
-        case .data(let payload, let delivery):
-            run(.dataReceived(payload, from: peer, delivery: delivery))
+        case .data(let payload, let delivery, let sequence):
+            if delivery == .reliableOrdered, let sequence {
+                deliverOrdered(payload, sequence: sequence, from: peer)
+            } else {
+                run(.dataReceived(payload, from: peer, delivery: delivery))
+            }
         case .closed:
-            connections.removeValue(forKey: peer)
-            receiveTasks.removeValue(forKey: peer)?.cancel()
+            forgetConnection(peer)
             run(.connectionClosed(peer))
         }
+    }
+
+    /// Releases `.reliableOrdered` messages strictly in sequence order (DD-7).
+    /// Reliable transport never loses, so the buffer only absorbs reordering;
+    /// exceeding the cap means the peer is misbehaving → connection-fatal.
+    private func deliverOrdered(_ payload: Data, sequence: UInt64, from peer: PeerID) {
+        var expected = expectedInboundSequence[peer, default: 0]
+        guard sequence >= expected else { return }  // duplicate — cannot happen on reliable
+        var buffer = reorderBuffer[peer, default: [:]]
+        buffer[sequence] = payload
+
+        if buffer.count > reorderBufferCap {
+            reorderBuffer[peer] = nil
+            expectedInboundSequence[peer] = nil
+            execute(.closeConnection(peer))
+            run(.connectionClosed(peer))
+            return
+        }
+
+        while let next = buffer.removeValue(forKey: expected) {
+            run(.dataReceived(next, from: peer, delivery: .reliableOrdered))
+            expected += 1
+        }
+        reorderBuffer[peer] = buffer
+        expectedInboundSequence[peer] = expected
+    }
+
+    private func handleIncomingStream(
+        _ header: StreamHeaderInfo, _ stream: any PeerByteStream, from peer: PeerID
+    ) {
+        switch header.kind {
+        case .transferChunk:
+            guard let id = header.transferID else { return }
+            pendingChunkStreams[id] = stream
+            matchTransfer(id)
+        case .appStream:
+            let label = header.label ?? stream.label
+            pendingAppStreams[peer, default: []].append((label: label, stream: stream))
+            matchAppStream(peer)
+        case .message, .orderedMessage:
+            // Messages arrive as `.data` connection events, not dedicated streams.
+            break
+        }
+    }
+
+    /// Drops all per-peer runtime bookkeeping for a closed connection.
+    private func forgetConnection(_ peer: PeerID) {
+        connections.removeValue(forKey: peer)
+        receiveTasks.removeValue(forKey: peer)?.cancel()
+        streamTasks.removeValue(forKey: peer)?.cancel()
+        outboundSequence.removeValue(forKey: peer)
+        expectedInboundSequence.removeValue(forKey: peer)
+        reorderBuffer.removeValue(forKey: peer)
+        pendingStreamOpens.removeValue(forKey: peer)
+        pendingAppStreams.removeValue(forKey: peer)
     }
 
     private func handleDiscovery(_ event: DiscoveryEvent) {
@@ -341,4 +598,19 @@ public actor PeerSession {
 public struct ResourceTransfer: Sendable {
     public let id: UUID
     public let progress: Progress
+}
+
+/// An incoming resource transfer's lifecycle (FR-17), mirroring MPC's
+/// `didStartReceivingResource` / `didFinishReceivingResource` semantics.
+///
+/// `@unchecked Sendable`: `Progress` is a Foundation reference type (already
+/// treated as sendable by ``ResourceTransfer``) and the `.failed` error is an
+/// `any Error` we only ever populate with sendable value types.
+public enum ResourceEvent: @unchecked Sendable {
+    /// The transfer began; observe/cancel via `progress`.
+    case started(name: String, from: PeerID, progress: Progress)
+    /// The transfer completed; the file is at `at` (a temp URL the app owns).
+    case finished(name: String, from: PeerID, at: URL)
+    /// The transfer failed or was cancelled; any partial temp file is discarded.
+    case failed(name: String, from: PeerID, error: any Error)
 }

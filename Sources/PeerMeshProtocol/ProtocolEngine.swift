@@ -65,6 +65,13 @@ public struct ProtocolEngine: Sendable {
         case peerJoined(PeerID)
         case peerLeft(PeerID)
         case messageReceived(Data, from: PeerID, delivery: Delivery)
+        /// A member announced a resource transfer on the control stream (FR-17).
+        /// The runtime matches the paired `transferChunk` stream by `id` and
+        /// performs the disk-to-disk transfer — the engine never touches files.
+        case transferOffered(id: UUID, name: String, totalBytes: UInt64, from: PeerID)
+        /// A member announced an application byte stream (FR-18). The runtime
+        /// matches the paired `appStream` by `label` and surfaces it.
+        case streamOpened(label: String, from: PeerID)
     }
 
     public enum InvitationFailure: Sendable, Equatable {
@@ -282,9 +289,17 @@ public struct ProtocolEngine: Sendable {
             // TODO(Phase 2): `.pairingCode` transcript verification (DD-2, S-4).
             return []
 
-        case .transferOffer, .streamOpen:
-            // TODO(Phase 1): transfer/stream signaling (FR-17, FR-18).
-            return []
+        case .transferOffer(let offer):
+            // Membership-gate (DD-6): announcements from non-members are ignored.
+            guard members.contains(peer) else { return [] }
+            guard let id = offer.transferID, let name = offer.name else { return [] }
+            return [.emit(.transferOffered(
+                id: id, name: name, totalBytes: offer.totalBytes, from: peer))]
+
+        case .streamOpen(let open):
+            guard members.contains(peer) else { return [] }
+            guard let label = open.label else { return [] }
+            return [.emit(.streamOpened(label: label, from: peer))]
 
         case .unrecognized:
             // Forward compatibility (QA-11, DD-5 rule 1): ignore-and-log.
