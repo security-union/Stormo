@@ -55,7 +55,7 @@ public final class MultipeerSession: @unchecked Sendable {
     private let delegateQueue = DispatchQueue(label: "mpccompat.session.delegate")
 
     public init(peer name: String, service: String) {
-        let identity = (try? PeerIdentity.loadOrCreate(name: name)) ?? PeerIdentity(name: name)
+        let identity = PeerIdentity.loadOrCreate(name: name)
         self.myPeerID = identity.id
         self.session = PeerSession(
             identity: identity,

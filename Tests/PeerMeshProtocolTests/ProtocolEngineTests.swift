@@ -10,7 +10,10 @@ import Testing
 struct ProtocolEngineTests {
 
     static func makePeer(_ name: String, byte: UInt8) -> PeerID {
-        PeerID(keyHash: Data(repeating: byte, count: 32), displayName: name)
+        // 34-byte libp2p multihash: 0x12 0x20 + 32-byte digest (DD-8).
+        PeerID(
+            keyHash: Data([0x12, 0x20]) + Data(repeating: byte, count: 32),
+            displayName: name)
     }
 
     let alice = Self.makePeer("Alice", byte: 0x0A)

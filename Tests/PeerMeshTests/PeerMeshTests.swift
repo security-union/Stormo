@@ -10,7 +10,8 @@ struct PeerMeshTests {
     func identityDerivesPeerID() {
         let identity = PeerIdentity(name: "Test Device")
         #expect(identity.id.displayName == "Test Device")
-        #expect(identity.id.keyHash.count == 32)  // SHA-256
+        #expect(identity.id.keyHash.count == 34)  // libp2p multihash (0x12 0x20 + SHA-256)
+        #expect(identity.id.keyHash.prefix(2) == Data([0x12, 0x20]))  // sha2-256, len 32
     }
 
     @Test("Distinct identities never collide on keyHash, even with equal names")

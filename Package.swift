@@ -28,6 +28,9 @@ let package = Package(
         // version (25.12.x split out a `Common` module the 25.2.10 codegen
         // doesn't import). Bump both together (DD-5 rule 4).
         .package(url: "https://github.com/google/flatbuffers.git", exact: "25.2.10"),
+        // Pure-Swift X.509 for self-signed identity certificates (DD-2). Used by
+        // the PeerMesh target only — PeerMeshProtocol stays FlatBuffers-only.
+        .package(url: "https://github.com/apple/swift-certificates.git", from: "1.0.0"),
     ],
     targets: [
         // Sans-I/O (DD-6): the ONLY dependency is FlatBuffers (pure CPU).
@@ -39,7 +42,13 @@ let package = Package(
             ]
         ),
         // Runtime shell: executes engine Effects against real transports.
-        .target(name: "PeerMesh", dependencies: ["PeerMeshProtocol"]),
+        .target(
+            name: "PeerMesh",
+            dependencies: [
+                "PeerMeshProtocol",
+                .product(name: "X509", package: "swift-certificates"),
+            ]
+        ),
         .target(name: "MPCCompat", dependencies: ["PeerMesh"]),
         .target(name: "PeerMeshUI", dependencies: ["PeerMesh"]),
         .target(name: "PeerMeshTestKit", dependencies: ["PeerMesh"]),

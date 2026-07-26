@@ -59,7 +59,7 @@ public actor PeerSession {
         trust: TrustPolicy = .automatic
     ) {
         self.init(
-            identity: (try? PeerIdentity.loadOrCreate(name: name)) ?? PeerIdentity(name: name),
+            identity: PeerIdentity.loadOrCreate(name: name),
             service: service,
             topology: topology,
             trust: trust

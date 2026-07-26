@@ -179,7 +179,7 @@ extension WirePeerInfo {
     /// Materializes the identity into engine state — one of the two permitted
     /// copy boundaries (identity fields must outlive the signal buffer).
     public var peerID: PeerID? {
-        guard keyHashCount == 32, let name = displayName else { return nil }
+        guard keyHashCount == 34, let name = displayName else { return nil }
         return PeerID(keyHash: Data(keyHash), displayName: name)
     }
 }

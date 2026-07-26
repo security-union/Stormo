@@ -6,7 +6,11 @@ import Testing
 @Suite("SignalCodec — verified zero-copy boundary (DD-5)")
 struct SignalCodecTests {
 
-    let alice = PeerID(keyHash: Data(repeating: 0x0A, count: 32), displayName: "Alice")
+    // 34-byte libp2p multihash (0x12 0x20 + 32-byte digest); the wire codec
+    // requires the multihash length (DD-8).
+    let alice = PeerID(
+        keyHash: Data([0x12, 0x20]) + Data(repeating: 0x0A, count: 32),
+        displayName: "Alice")
 
     @Test("Wire round-trip: encode → decode reads the same fields in place")
     func roundTrip() throws {
@@ -48,7 +52,9 @@ struct SignalCodecTests {
     @Test("Roster round-trips through zero-copy views")
     func rosterRoundTrip() throws {
         let peers = (1...5).map {
-            PeerID(keyHash: Data(repeating: UInt8($0), count: 32), displayName: "Peer \($0)")
+            PeerID(
+                keyHash: Data([0x12, 0x20]) + Data(repeating: UInt8($0), count: 32),
+                displayName: "Peer \($0)")
         }
         let decoded = try SignalCodec.decode(
             SignalCodec.encode(.inviteResponse(accepted: true, roster: peers)))
