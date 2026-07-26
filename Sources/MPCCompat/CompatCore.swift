@@ -308,19 +308,23 @@ final class CompatCore: @unchecked Sendable {
         at url: URL,
         name: String,
         to peerID: PeerID,
-        completion: (@Sendable (Error?) -> Void)?
+        completion: ((Error?) -> Void)?
     ) -> Progress {
         let proxy = Progress(totalUnitCount: 1)
         proxy.isCancellable = true
         let session = liveSession()
+        // MCSession never required a Sendable completion; the bridge carries it
+        // across threads in an unchecked box and fires it only on the serial
+        // delegate queue (same isolation contract as every delegate callback).
+        let boxed = completion.map(UncheckedSendableBox.init)
         Task { [weak self] in
             do {
                 let transfer = try await session.sendResource(at: url, to: peerID, name: name)
                 proxy.addChild(transfer.progress, withPendingUnitCount: 1)
-                self?.watchForCompletion(transfer.progress, completion: completion)
+                self?.watchForCompletion(transfer.progress, completion: boxed)
             } catch {
                 proxy.cancel()
-                self?.delegateQueue.async { completion?(error) }
+                self?.delegateQueue.async { boxed?.value(error) }
             }
         }
         return proxy
@@ -329,7 +333,7 @@ final class CompatCore: @unchecked Sendable {
     private var progressObservations: [UUID: NSKeyValueObservation] = [:]
 
     private func watchForCompletion(
-        _ progress: Progress, completion: (@Sendable (Error?) -> Void)?
+        _ progress: Progress, completion: UncheckedSendableBox<(Error?) -> Void>?
     ) {
         guard let completion else { return }
         let token = UUID()
@@ -337,7 +341,7 @@ final class CompatCore: @unchecked Sendable {
             [weak self] progress, _ in
             guard progress.isFinished || progress.isCancelled else { return }
             self?.delegateQueue.async {
-                completion(progress.isCancelled ? CocoaError(.userCancelled) : nil)
+                completion.value(progress.isCancelled ? CocoaError(.userCancelled) : nil)
             }
             self?.lock.lock()
             self?.progressObservations.removeValue(forKey: token)
@@ -431,4 +435,12 @@ final class CompatRegistry: @unchecked Sendable {
         cores[key] = WeakBox(core)
         return core
     }
+}
+
+/// Carries a non-Sendable value across an isolation boundary under a manual
+/// safety argument. Used for MC-era completion handlers: the value is only
+/// ever invoked on the core's serial delegate queue.
+final class UncheckedSendableBox<T>: @unchecked Sendable {
+    let value: T
+    init(_ value: T) { self.value = value }
 }

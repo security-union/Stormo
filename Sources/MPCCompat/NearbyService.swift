@@ -57,7 +57,7 @@ public final class NearbyServiceAdvertiser: @unchecked Sendable {
     }
 }
 
-public protocol NearbyServiceAdvertiserDelegate: AnyObject, Sendable {
+public protocol NearbyServiceAdvertiserDelegate: AnyObject {
     func advertiser(
         _ advertiser: NearbyServiceAdvertiser,
         didReceiveInvitationFromPeer peerID: PeerID,
@@ -125,7 +125,7 @@ public final class NearbyServiceBrowser: @unchecked Sendable {
     }
 }
 
-public protocol NearbyServiceBrowserDelegate: AnyObject, Sendable {
+public protocol NearbyServiceBrowserDelegate: AnyObject {
     func browser(
         _ browser: NearbyServiceBrowser,
         foundPeer peerID: PeerID,

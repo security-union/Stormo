@@ -180,7 +180,7 @@ public final class MultipeerSession: @unchecked Sendable {
         at resourceURL: URL,
         withName resourceName: String,
         toPeer peerID: PeerID,
-        withCompletionHandler completionHandler: (@Sendable (Error?) -> Void)? = nil
+        withCompletionHandler completionHandler: ((Error?) -> Void)? = nil
     ) -> Progress? {
         guard let core else {
             completionHandler?(PeerMeshError.peerUnreachable(peerID))
@@ -224,7 +224,13 @@ extension PeerID {
 }
 
 /// Near-drop-in replacement for `MCSessionDelegate` (FR-24).
-public protocol MultipeerSessionDelegate: AnyObject, Sendable {
+///
+/// Deliberately NOT `Sendable` — the
+/// real MCSessionDelegate predates concurrency annotations, and requiring it
+/// would force the requirement onto every migrated conformer. Callbacks
+/// arrive on the compat serial delegate queue; thread-safety is the
+/// bridge's job, not the conformer's.
+public protocol MultipeerSessionDelegate: AnyObject {
     func session(_ session: MultipeerSession, peer peerID: PeerID, didChange state: MultipeerSession.PeerState)
     func session(_ session: MultipeerSession, didReceive data: Data, fromPeer peerID: PeerID)
     func session(_ session: MultipeerSession, didReceive stream: InputStream, withName streamName: String, fromPeer peerID: PeerID)
