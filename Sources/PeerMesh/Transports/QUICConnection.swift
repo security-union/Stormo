@@ -21,6 +21,9 @@ import Network
 /// `NWConnectionGroup.extract()` opens outbound streams; `newConnectionHandler`
 /// surfaces inbound ones.
 final class QUICConnection: PeerConnection, @unchecked Sendable {
+    /// Fired once on terminal close (before streams finish); used by `accept`
+    /// to release the pending-inbound retention.
+    var onTerminated: (@Sendable () -> Void)?
 
     // MARK: PeerConnection surface
 
@@ -116,6 +119,13 @@ final class QUICConnection: PeerConnection, @unchecked Sendable {
     /// Wrap an accepted `NWConnectionGroup` (from `NWListener.newConnectionGroupHandler`).
     /// The connection is *not* surfaced to the caller until its control stream's
     /// `PeerHello` has been read, so `remotePeer` is final before adoption.
+    /// Pending inbound connections, retained strongly until the control-stream
+    /// handshake completes (or the group dies). Without this the freshly
+    /// created `QUICConnection` has no strong owner between `accept()`
+    /// returning and `onReady` firing — all handlers capture it weakly — so it
+    /// deallocates and every incoming stream is silently dropped.
+    private static let pendingInbound = Locked<[ObjectIdentifier: QUICConnection]>([:])
+
     static func accept(
         group: NWConnectionGroup,
         localPeer: PeerID,
@@ -128,6 +138,12 @@ final class QUICConnection: PeerConnection, @unchecked Sendable {
             remotePeer: placeholder, remoteKeyHash: Data(), ownedIdentity: nil)
 
         quicDebug("accept: group arrived")
+        let token = ObjectIdentifier(connection)
+        Self.pendingInbound.withLock { $0[token] = connection }
+        let release: @Sendable () -> Void = {
+            Self.pendingInbound.withLock { _ = $0.removeValue(forKey: token) }
+        }
+
         let readyFired = Locked(false)
         connection.installIncomingStreamHandler(isInbound: true) { [weak connection] control in
             guard let connection else { return }
@@ -138,13 +154,16 @@ final class QUICConnection: PeerConnection, @unchecked Sendable {
                     quicDebug("accept: inbound control done, remote=\(connection.remotePeer)")
                     if readyFired.compareAndSet(expected: false, new: true) {
                         onReady(connection)
+                        release()  // adopted: PeerSession holds it now
                     }
                 } catch {
                     quicDebug("accept: inbound control error \(error)")
                     connection.finishClosed()
+                    release()
                 }
             }
         }
+        connection.onTerminated = release  // group failed before handshake
         connection.observeGroupTermination()
         group.start(queue: queue)
     }
@@ -255,6 +274,7 @@ final class QUICConnection: PeerConnection, @unchecked Sendable {
     private func handleDedicatedStream(_ stream: NWConnection) async throws {
         let headerFrame = try await quicReceiveFrame(stream)
         let header = try QUICStreamHeaderCodec.decode(headerFrame)
+        quicDebug("dedicated: header kind=\(header.kind) seq=\(String(describing: header.sequence))")
 
         switch header.kind {
         case .message, .orderedMessage:
@@ -264,8 +284,10 @@ final class QUICConnection: PeerConnection, @unchecked Sendable {
             while true {
                 let (chunk, isComplete) = try await quicReceiveChunk(stream)
                 payload.append(chunk)
+                quicDebug("dedicated: chunk \(chunk.count)B complete=\(isComplete)")
                 if isComplete { break }
             }
+quicDebug("dedicated: yielding data \(payload.count)B")
             eventsContinuation.yield(.data(payload, delivery, sequence: sequence))
 
         case .transferChunk, .appStream:
@@ -349,6 +371,7 @@ final class QUICConnection: PeerConnection, @unchecked Sendable {
 
     func close() async {
         guard closed.compareAndSet(expected: false, new: true) else { return }
+        onTerminated?()
         control.value?.cancel()
         group.cancel()
         eventsContinuation.yield(.closed)
@@ -360,6 +383,7 @@ final class QUICConnection: PeerConnection, @unchecked Sendable {
     /// Idempotent close triggered by transport-side failure (peer reset, group end).
     private func finishClosed() {
         guard closed.compareAndSet(expected: false, new: true) else { return }
+        onTerminated?()
         eventsContinuation.yield(.closed)
         eventsContinuation.finish()
         incomingStreamsContinuation.finish()

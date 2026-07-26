@@ -40,6 +40,8 @@ func quicDebug(_ s: @autoclosure () -> String) {
     let url = URL(fileURLWithPath: "/private/tmp/claude-501/-Users-darioalessandro-Documents-multipeer-connectivity/2401fce3-1214-4515-9cbb-686ff2125601/scratchpad/phases.log")
     if let h = try? FileHandle(forWritingTo: url) {
         h.seekToEndOfFile(); h.write(Data(line.utf8)); try? h.close()
+    } else {
+        try? Data(line.utf8).write(to: url)
     }
 }
 
@@ -90,20 +92,38 @@ enum QUICFraming {
 /// (DD-7: `PeerByteStream.write` is back-pressured). `isComplete` FINs the
 /// stream after this send.
 func quicSend(_ connection: NWConnection, _ data: Data, isComplete: Bool = false) async throws {
-    try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Void, Error>) in
-        connection.send(content: data.isEmpty ? nil : data, isComplete: isComplete,
-                        completion: .contentProcessed { error in
-            if let error { cont.resume(throwing: error) } else { cont.resume() }
-        })
+    // Two-step FIN (the empirically reliable Network.framework pattern):
+    // payload rides the default context; the FIN is a separate empty
+    // `.finalMessage` send. Sending payload *with* `.finalMessage` was
+    // observed to deliver nothing to the peer's receive on QUIC streams, and
+    // `isComplete` on the default context never surfaces stream completion.
+    if !data.isEmpty {
+        try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Void, Error>) in
+            connection.send(
+                content: data,
+                completion: .contentProcessed { error in
+                    if let error {
+                        quicDebug("send ERROR \(error)")
+                        cont.resume(throwing: error)
+                    } else {
+                        cont.resume()
+                    }
+                })
+        }
+    }
+    if isComplete {
+        await quicFinish(connection)
     }
 }
 
 /// FIN the stream (empty final segment).
 func quicFinish(_ connection: NWConnection) async {
     await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
-        connection.send(content: nil, isComplete: true, completion: .contentProcessed { _ in
-            cont.resume()
-        })
+        connection.send(
+            content: nil, contentContext: .finalMessage, isComplete: true,
+            completion: .contentProcessed { _ in
+                cont.resume()
+            })
     }
 }
 
