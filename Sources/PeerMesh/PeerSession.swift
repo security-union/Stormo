@@ -232,6 +232,19 @@ public actor PeerSession {
 
     // MARK: Lifecycle
 
+    /// Leave the session — close all peer connections and clear membership —
+    /// while KEEPING advertising, browsing, the transport's endpoint
+    /// knowledge, and the event streams alive. The session is immediately
+    /// reusable for a fresh invite (MCSession's disconnect-then-reinvite
+    /// pattern). For full teardown including radio release use ``disconnect()``.
+    public func leave() async {
+        run(.command(.leave))
+        for timer in timers.values { timer.cancel() }
+        timers.removeAll()
+        inviteWaiters.forEach { $0.value.resume(throwing: PeerMeshError.peerUnreachable($0.key)) }
+        inviteWaiters.removeAll()
+    }
+
     /// Leave the session and release all radio resources (FR-5, C-5).
     public func disconnect() async {
         run(.command(.leave))

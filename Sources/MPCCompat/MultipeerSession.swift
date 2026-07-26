@@ -198,9 +198,13 @@ public final class MultipeerSession: @unchecked Sendable {
     }
 
     public func disconnect() {
-        // MCSession reuse semantics: tear the PeerSession down; the next action
-        // through the shared core lazily rebuilds a fresh one (same identity).
-        core?.teardown()
+        // MCSession semantics: drop session connections/membership ONLY.
+        // Advertiser/browser (independent objects in MPC) keep running, and
+        // the underlying PeerSession + transport survive so a re-invite still
+        // knows the peer's endpoint. Full teardown belongs to the app-level
+        // stop path (advertiser/browser stop + this), which the core folds
+        // into leaveSession + stopped discovery.
+        core?.leaveSession()
         stateLock.lock()
         _connectedPeers.removeAll()
         stateLock.unlock()

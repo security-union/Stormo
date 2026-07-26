@@ -100,8 +100,21 @@ final class CompatCore: @unchecked Sendable {
         return _session
     }
 
-    /// Tear down the `PeerSession` and stop the pumps; a subsequent action
-    /// rebuilds a fresh session under the same identity (MCSession reuse).
+    /// `MCSession.disconnect()` semantics: drop the session's peer connections
+    /// and membership ONLY. Discovery (advertiser/browser), the transport's
+    /// endpoint knowledge, and the event pumps all stay alive — in MPC those
+    /// belong to independent objects that disconnect never touched. This is
+    /// what makes the app's classic rebuild-session-then-reinvite retry
+    /// pattern work: the re-invite still knows how to reach the peer.
+    func leaveSession() {
+        guard let session = currentSession() else { return }
+        Task { await session.leave() }
+    }
+
+    /// Full teardown: `PeerSession` destroyed, pumps stopped, radios released;
+    /// a subsequent action rebuilds a fresh session under the same identity.
+    /// Use for app-level stop (MultipeerService.stopSession), NOT for
+    /// MCSession.disconnect — that's ``leaveSession()``.
     func teardown() {
         lock.lock()
         let session = _session

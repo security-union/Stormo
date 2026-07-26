@@ -286,3 +286,70 @@ struct MPCCompatE2ETests {
         #expect(session.core === advertiser.core)
     }
 }
+
+#if os(macOS)
+extension MPCCompatE2ETests {
+    /// Remote-shutter's retry pattern over the PRODUCTION transport path
+    /// (real QUIC + Bonjour, no injected transport): connect, disconnect
+    /// (MCSession-style session rebuild), then RE-invite the same discovered
+    /// peer WITHOUT re-browsing. Regression for the device bug where
+    /// disconnect tore down discovery + the endpoint registry, making every
+    /// retry fail instantly ("browser has already been cancelled").
+    @Test("Disconnect then re-invite over real QUIC (MCSession retry semantics)")
+    func reinviteAfterDisconnectOverQUIC() async throws {
+        setenv("PEERMESH_NO_P2P", "1", 1)
+        let probe = PeerIdentity(name: "compat-retry-probe")
+        guard QUICTransport.isTLSIdentityAvailable(for: probe) else {
+            print("[skip] no TLS identity in this environment"); return
+        }
+        let service = "_pmretry\(UInt16.random(in: 1000...9999))._udp"
+        let peerA = PeerID(displayName: "RetryCam")
+        let peerB = PeerID(displayName: "RetryMon")
+
+        let sessionA = MultipeerSession(peer: peerA, service: service)
+        let recorderA = SessionRecorder()
+        sessionA.delegate = recorderA
+        let advDelegate = AutoAcceptAdvertiserRecorder(accepting: sessionA)
+        let advertiser = NearbyServiceAdvertiser(
+            peer: peerA, discoveryInfo: nil, serviceType: service)
+        advertiser.delegate = advDelegate
+        advertiser.startAdvertisingPeer()
+
+        let sessionB = MultipeerSession(peer: peerB, service: service)
+        let recorderB = SessionRecorder()
+        sessionB.delegate = recorderB
+        let browserDelegate = BrowserRecorder()
+        let browser = NearbyServiceBrowser(peer: peerB, serviceType: service)
+        browser.delegate = browserDelegate
+        browser.startBrowsingForPeers()
+
+        var found: PeerID?
+        for await (peer, _) in browserDelegate.found {
+            if peer.displayName == "RetryCam" { found = peer; break }
+        }
+        let target = try #require(found)
+
+        // Round 1: connect.
+        browser.invitePeer(target, to: sessionB, withContext: nil, timeout: 25)
+        var stateB = await firstState(recorderB, matching: .connected)
+        #expect(stateB != nil, "round 1 must connect")
+
+        // MCSession-style rebuild: disconnect, survivor sees .notConnected.
+        sessionB.disconnect()
+        let departed = await firstState(recorderA, matching: .notConnected)
+        #expect(departed != nil, "camera must observe the departure")
+
+        // Round 2: RE-invite the SAME discovered peer, no fresh browsing.
+        // Under the old teardown semantics this failed instantly (endpoint
+        // registry destroyed with the session).
+        browser.invitePeer(target, to: sessionB, withContext: nil, timeout: 25)
+        stateB = await firstState(recorderB, matching: .connected)
+        #expect(stateB != nil, "re-invite after disconnect must connect again")
+
+        sessionB.disconnect()
+        sessionA.disconnect()
+        advertiser.stopAdvertisingPeer()
+        browser.stopBrowsingForPeers()
+    }
+}
+#endif
