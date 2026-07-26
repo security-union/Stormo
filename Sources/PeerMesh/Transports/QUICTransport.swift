@@ -95,11 +95,13 @@ public final class QUICTransport: PeerTransport, @unchecked Sendable {
     /// `false` — QUIC tests should skip cleanly and hosts should inject a
     /// `SecIdentity` via ``Configuration/tlsProvider``.
     /// Peer-to-peer Wi-Fi opt-out (`PEERMESH_NO_P2P=1`): same-machine
-    /// self-dials fail with `includePeerToPeer` enabled (docs/spike-results.md),
-    /// so entitled in-process E2E tests disable it. Read dynamically — tests
-    /// may `setenv` before starting services.
+    /// self-dials fail with `includePeerToPeer` enabled, and on AWDL-less VMs
+    /// (CI runners) such dials trap outright (docs/spike-results.md), so
+    /// same-machine test runs disable it. `getenv`, not `ProcessInfo`: the
+    /// latter caches the environment at first access, which silently ignores
+    /// a test's later `setenv`.
     static var peerToPeerEnabled: Bool {
-        ProcessInfo.processInfo.environment["PEERMESH_NO_P2P"] == nil
+        getenv("PEERMESH_NO_P2P") == nil
     }
 
     /// Bonjour registration types are `_name._tcp|_udp` with a 1–15 char name.

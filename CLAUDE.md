@@ -101,7 +101,11 @@ code that guards them without understanding why it exists.
    iOS 26 (the bug that killed MPC). Keepalives exist to assert interface use and
    hold the QUIC idle timeout.
 10. **`includePeerToPeer` breaks same-machine self-dials.** Use
-    `PEERMESH_NO_P2P=1` for in-process tests.
+    `PEERMESH_NO_P2P=1` for in-process tests. On AWDL-less VMs (GitHub CI
+    runners) a p2p dial doesn't just fail — it SIGTRAPs inside libnetwork, so
+    CI sets the flag for every same-machine job (swift test and cross-process
+    E2E alike). Note `ProcessInfo.environment` caches at first access; the
+    driver reads this flag via `getenv` so a test's `setenv` actually lands.
 11. **Swift NSError bridging renumbers payload enum cases.** All public errors
     must conform to `LocalizedError` so the diagnostic string survives bridging.
 
