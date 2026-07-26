@@ -71,3 +71,24 @@ coordinator arms 10 s transient-state timeouts, a candidate explanation for
 device-side "Connecting → Not Connected" alongside AP client isolation.
 The QUIC_DEBUG transcript discriminates: dial stuck in `waiting` = network
 path blocked; steady progress cut short = timeout too tight.
+
+## Device-blocking findings (Jul 26 evening — from real iPhone/iPad + Catalyst logs)
+
+1. **Stale keychain identity (THE cross-device connect failure).**
+   `makeSecIdentity`'s final `kSecClassIdentity` fetch had no discriminator —
+   it returned an arbitrary (often stale) identity from the app's persistent
+   data-protection keychain, so the presented TLS cert failed the dialer's
+   key-hash cross-check → `identityMismatch` on every dial ("Connecting →
+   Not Connected"). Only reproducible on entitled persistent keychains
+   (iOS/iPadOS/Catalyst) — macOS test paths use a per-run file keychain,
+   which is why every macOS rung was green. Fix: pin the fetch to the key's
+   `kSecAttrApplicationLabel` (public-key hash). Regression coverage: the
+   remote-shutter Catalyst in-process loopback test now runs the FULL app
+   stack over real QUIC and passes (1.2 s).
+2. **`group.extract()` vs `NWConnection(from:)`.** On the iOS-family stack,
+   extract()-created streams warn `nw_connection_copy_protocol_metadata on
+   unconnected` and behave inconsistently; `NWConnection(from: group)`
+   (iOS 16+/macOS 13+) is the supported stream-creation API and is now used
+   everywhere, with extract() only as the macOS 12 fallback.
+3. **MCSession.disconnect semantics** (fixed earlier same day): disconnect
+   must never tear down discovery — see the re-invite regression test.

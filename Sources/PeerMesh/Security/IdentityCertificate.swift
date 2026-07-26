@@ -110,10 +110,26 @@ extension IdentityCertificate {
             throw CertificateError.certificateCreationFailed
         }
 
+        // The key's application label (the public-key hash, assigned by the
+        // Security framework) is the canonical link between a cert and its
+        // key — and the ONLY safe way to fetch the matching identity below.
+        // Fetching kSecClassIdentity without it returns an arbitrary identity
+        // from the keychain; with ephemeral per-session keys accumulating
+        // across runs that served STALE identities whose certificates failed
+        // the peer's key-hash cross-check (identityMismatch on every dial —
+        // the device-side "Connecting → Not Connected" bug).
+        guard
+            let keyAttributes = SecKeyCopyAttributes(secKey) as? [String: Any],
+            let applicationLabel = keyAttributes[kSecAttrApplicationLabel as String] as? Data
+        else {
+            throw CertificateError.certificateCreationFailed
+        }
+
         // Add the private key.
         let addKey: [String: Any] = [
             kSecClass as String: kSecClassKey,
             kSecValueRef as String: secKey,
+            kSecAttrApplicationTag as String: Data("dev.securityunion.peermesh.tls".utf8),
             kSecUseDataProtectionKeychain as String: true,
         ]
         let keyStatus = SecItemAdd(addKey as CFDictionary, nil)
@@ -132,9 +148,11 @@ extension IdentityCertificate {
             throw CertificateError.secItemStatus(certStatus)
         }
 
-        // Fetch the assembled SecIdentity.
+        // Fetch the assembled SecIdentity — pinned to THIS key via its
+        // application label, never "whichever identity comes first".
         let query: [String: Any] = [
             kSecClass as String: kSecClassIdentity,
+            kSecAttrApplicationLabel as String: applicationLabel,
             kSecReturnRef as String: true,
             kSecUseDataProtectionKeychain as String: true,
         ]

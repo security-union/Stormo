@@ -110,6 +110,7 @@ enum QUICFraming {
 /// (DD-7: `PeerByteStream.write` is back-pressured). `isComplete` FINs the
 /// stream after this send.
 func quicSend(_ connection: NWConnection, _ data: Data, isComplete: Bool = false) async throws {
+    quicDebug("quicSend: \(data.count)B complete=\(isComplete) state=\(connection.state)")
     // Two-step FIN (the empirically reliable Network.framework pattern):
     // payload rides the default context; the FIN is a separate empty
     // `.finalMessage` send. Sending payload *with* `.finalMessage` was

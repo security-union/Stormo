@@ -137,11 +137,16 @@ public final class MultipeerSession: @unchecked Sendable {
     /// Adopt this session as `core`'s delegate target. Called from
     /// `browser.invitePeer(_:to:)` and the advertiser's `invitationHandler`.
     func bind(to core: CompatCore) {
+        // The advertiser/browser's serviceType always wins — MCSession never
+        // carried a service type, so a standalone-constructed MultipeerSession
+        // parks with a placeholder until an advertiser/browser binds it. This
+        // is the designed flow, not an anomaly; log only in debug builds.
+        #if DEBUG
         if placeholderService != core.serviceType {
-            // The advertiser/browser's serviceType wins (MC has none on session).
-            print("MPCCompat: MultipeerSession service '\(placeholderService)' "
-                + "superseded by discovery serviceType '\(core.serviceType)'.")
+            print("MPCCompat: session bound to serviceType '\(core.serviceType)' "
+                + "(placeholder '\(placeholderService)' discarded — expected flow).")
         }
+        #endif
         stateLock.lock()
         _core = core
         stateLock.unlock()

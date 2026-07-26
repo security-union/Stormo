@@ -66,6 +66,24 @@ final class QUICConnection: PeerConnection, @unchecked Sendable {
         (self.incomingStreams, self.incomingStreamsContinuation) = AsyncStream.makeStream()
     }
 
+    // MARK: - Stream creation
+
+    /// Open a NEW outgoing QUIC stream within the group.
+    ///
+    /// `NWConnection(from:)` is the supported stream-creation API and is
+    /// REQUIRED on the iOS-family network stack (iOS, Catalyst): streams
+    /// produced by `group.extract()` there report `.ready` but never transmit
+    /// — the peer sees the QUIC connection reach `connected` and then time
+    /// out waiting for bytes (observed on-device and as the Catalyst
+    /// in-process stall; see docs/spike-results.md). `extract()` behaves on
+    /// pure macOS 12, so it remains only as the pre-macOS-13 fallback.
+    private func openGroupStream() -> NWConnection? {
+        if #available(iOS 16.0, macOS 13.0, tvOS 16.0, macCatalyst 16.0, *) {
+            return NWConnection(from: group)
+        }
+        return group.extract()
+    }
+
     // MARK: - Outbound (dialer)
 
     /// Dial a peer and complete the control-stream identity bootstrap.
@@ -91,14 +109,16 @@ final class QUICConnection: PeerConnection, @unchecked Sendable {
         try await connection.startGroupAndWaitReady()
         quicDebug("dial: group ready")
 
-        guard let control = group.extract() else { throw QUICError.connectionClosed }
+        guard let control = connection.openGroupStream() else { throw QUICError.connectionClosed }
         connection.control.value = control
         try await quicAwaitReady(control, queue: queue)
         quicDebug("dial: control ready")
 
         // Authenticated key hash from the TLS handshake (FR-22).
-        if let der = quicPeerCertificateDER(control),
-           let keyHash = TrustEvaluator.keyHash(fromCertificateDER: der) {
+        quicDebug("dial: extracting peer cert")
+        let der = quicPeerCertificateDER(control)
+        quicDebug("dial: cert bytes=\(der?.count ?? -1)")
+        if let der, let keyHash = TrustEvaluator.keyHash(fromCertificateDER: der) {
             guard keyHash == remote.keyHash else { throw QUICError.identityMismatch }
             connection.remoteKeyHashBox.value = keyHash
         }
@@ -357,7 +377,7 @@ quicDebug("dedicated: yielding data \(payload.count)B")
     /// `StreamHeader` prologue (DD-7). Returns the ready stream positioned at the
     /// payload.
     private func openDedicatedStream(header: StreamHeaderInfo) async throws -> NWConnection {
-        guard let stream = group.extract() else {
+        guard let stream = openGroupStream() else {
             quicDebug("openDedicated: extract() returned nil (kind=\(header.kind))")
             throw QUICError.connectionClosed
         }
@@ -403,6 +423,7 @@ quicDebug("dedicated: yielding data \(payload.count)B")
 /// order (DD-5), independent of how many tasks call `sendSignal` concurrently.
 private actor ControlWriter {
     func send(_ connection: NWConnection, tag: QUICFraming.StreamTag?, frame: Data) async throws {
+        quicDebug("writer: sending frame tag=\(String(describing: tag)) \(frame.count)B")
         var out = Data()
         if let tag { out.append(tag.rawValue) }
         out.append(QUICFraming.lengthPrefix(frame.count))
