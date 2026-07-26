@@ -124,15 +124,13 @@ public struct ProtocolEngine: Sendable {
 
         case .connectionEstablished(let peer):
             connections.insert(peer)
-            // If we initiated for a pending invitation, send it now (FR-8:
-            // the invite travels only over the secured connection).
+            // If we initiated for a pending invitation, send it now (FR-8: the
+            // invite travels only over the secured connection). The invitation
+            // timer was armed when the invite command was issued — it covers
+            // the dial too, so a hanging dial fails the invite instead of
+            // waiting forever.
             if let context = pendingOutgoing[peer] {
-                return [
-                    .sendSignal(.invite(inviter: localPeer, context: context), to: peer),
-                    .startTimer(
-                        .invitation(peer),
-                        duration: pendingTimeouts[peer] ?? configuration.invitationTimeout),
-                ]
+                return [.sendSignal(.invite(inviter: localPeer, context: context), to: peer)]
             }
             return []
 
@@ -177,14 +175,21 @@ public struct ProtocolEngine: Sendable {
         case .invite(let peer, let context, let timeout):
             guard !members.contains(peer), pendingOutgoing[peer] == nil else { return [] }
             pendingOutgoing[peer] = context
-            pendingTimeouts[peer] = timeout ?? configuration.invitationTimeout
+            let duration = timeout ?? configuration.invitationTimeout
+            pendingTimeouts[peer] = duration
+            // The timer arms HERE — covering the dial as well as the
+            // handshake — so a transport that hangs (radio limbo, filtered
+            // UDP) surfaces as a timed-out invitation, never an infinite wait.
             if connections.contains(peer) {
                 return [
                     .sendSignal(.invite(inviter: localPeer, context: context), to: peer),
-                    .startTimer(.invitation(peer), duration: pendingTimeouts[peer] ?? configuration.invitationTimeout),
+                    .startTimer(.invitation(peer), duration: duration),
                 ]
             }
-            return [.connect(to: peer)]
+            return [
+                .connect(to: peer),
+                .startTimer(.invitation(peer), duration: duration),
+            ]
 
         case .respondToInvitation(let peer, let accept):
             guard pendingIncoming.removeValue(forKey: peer) != nil else { return [] }

@@ -27,14 +27,18 @@ struct ProtocolEngineTests {
 
         // Alice invites Bob: engine asks the driver to connect.
         let step1 = inviter.handle(.command(.invite(bob, context: context, timeout: nil)))
-        #expect(step1 == [.connect(to: bob)])
+        #expect(step1 == [
+            .connect(to: bob),
+            .startTimer(.invitation(bob), duration: 30),
+        ])
 
         // Driver reports the secured connection; engine sends the invite and
         // arms the timeout (FR-8, FR-9).
         let step2 = inviter.handle(.connectionEstablished(bob))
+        // Timer already armed at invite time (covers the dial); established
+        // connection only triggers the invite signal.
         #expect(step2 == [
-            .sendSignal(.invite(inviter: alice, context: context), to: bob),
-            .startTimer(.invitation(bob), duration: 30),
+            .sendSignal(.invite(inviter: alice, context: context), to: bob)
         ])
 
         // "Deliver" the invite to Bob's engine — this is the whole transport
