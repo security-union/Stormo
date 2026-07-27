@@ -313,7 +313,14 @@ final class CompatCore: @unchecked Sendable {
         to peerID: PeerID,
         completion: ((Error?) -> Void)?
     ) -> Progress {
-        let proxy = Progress(totalUnitCount: 1)
+        // MCSession parity: the returned Progress counts BYTES on the sender's
+        // side, live from the first chunk. A child-composed proxy surfaces
+        // only fractionCompleted — apps reading completed/total unit counts
+        // ("12 of 48 MB" bars) sit at 0 until the end — so the transfer's
+        // real progress is mirrored into the proxy unit-for-unit instead.
+        let attributes = try? FileManager.default.attributesOfItem(atPath: url.path)
+        let totalBytes = ((attributes?[.size] as? NSNumber)?.int64Value).map { max($0, 1) } ?? 1
+        let proxy = Progress(totalUnitCount: totalBytes)
         proxy.isCancellable = true
         let session = liveSession()
         // MCSession never required a Sendable completion; the bridge carries it
@@ -323,8 +330,9 @@ final class CompatCore: @unchecked Sendable {
         Task { [weak self] in
             do {
                 let transfer = try await session.sendResource(at: url, to: peerID, name: name)
-                proxy.addChild(transfer.progress, withPendingUnitCount: 1)
-                self?.watchForCompletion(transfer.progress, completion: boxed)
+                if proxy.isCancelled { transfer.progress.cancel() }
+                proxy.cancellationHandler = { transfer.progress.cancel() }
+                self?.mirror(transfer.progress, into: proxy, completion: boxed)
             } catch {
                 proxy.cancel()
                 self?.delegateQueue.async { boxed?.value(error) }
@@ -333,25 +341,33 @@ final class CompatCore: @unchecked Sendable {
         return proxy
     }
 
-    private var progressObservations: [UUID: NSKeyValueObservation] = [:]
+    private var progressObservations: [UUID: [NSKeyValueObservation]] = [:]
 
-    private func watchForCompletion(
-        _ progress: Progress, completion: UncheckedSendableBox<(Error?) -> Void>?
+    /// Mirrors the transfer's real progress into the app-facing proxy
+    /// unit-for-unit, and fires the completion once on finish/cancel.
+    private func mirror(
+        _ real: Progress, into proxy: Progress,
+        completion: UncheckedSendableBox<(Error?) -> Void>?
     ) {
-        guard let completion else { return }
         let token = UUID()
-        let observation = progress.observe(\.fractionCompleted, options: [.new, .initial]) {
-            [weak self] progress, _ in
-            guard progress.isFinished || progress.isCancelled else { return }
-            self?.delegateQueue.async {
-                completion.value(progress.isCancelled ? CocoaError(.userCancelled) : nil)
+        let units = real.observe(\.completedUnitCount, options: [.initial, .new]) { real, _ in
+            proxy.totalUnitCount = real.totalUnitCount
+            proxy.completedUnitCount = real.completedUnitCount
+        }
+        let done = real.observe(\.fractionCompleted, options: [.new, .initial]) {
+            [weak self] real, _ in
+            guard real.isFinished || real.isCancelled else { return }
+            if let completion {
+                self?.delegateQueue.async {
+                    completion.value(real.isCancelled ? CocoaError(.userCancelled) : nil)
+                }
             }
             self?.lock.lock()
             self?.progressObservations.removeValue(forKey: token)
             self?.lock.unlock()
         }
         lock.lock()
-        progressObservations[token] = observation
+        progressObservations[token] = [units, done]
         lock.unlock()
     }
 
