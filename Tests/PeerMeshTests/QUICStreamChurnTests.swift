@@ -1,7 +1,7 @@
 import Foundation
 import Testing
 
-import PeerMesh
+@testable import PeerMesh
 
 #if canImport(Network) && canImport(Security)
 
@@ -84,6 +84,20 @@ struct QUICStreamChurnTests {
         #expect(await received.value == messageCount)
         await monitor.disconnect()
         await camera.disconnect()
+
+        // No zombie streams (failure mode 13): every opened message-stream
+        // handle must retire. Retirement is asynchronous (the sender's retire
+        // follows the receiver's), so poll briefly before judging.
+        let deadline = Date().addingTimeInterval(10)
+        while QUICConnection.dedicatedOpened.value != QUICConnection.dedicatedRetired.value,
+            Date() < deadline
+        {
+            try await Task.sleep(nanoseconds: 100_000_000)
+        }
+        let opened = QUICConnection.dedicatedOpened.value
+        let retired = QUICConnection.dedicatedRetired.value
+        #expect(opened >= messageCount * 2)  // sender + receiver handles
+        #expect(retired == opened, "zombie streams: \(opened - retired) opened, never retired")
     }
 }
 

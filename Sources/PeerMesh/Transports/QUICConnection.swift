@@ -22,6 +22,12 @@ import Network
 /// macOS 12 fallback — see ``openGroupStream()``); `newConnectionHandler`
 /// surfaces inbound ones.
 final class QUICConnection: PeerConnection, @unchecked Sendable {
+    /// Leak accounting for dedicated message streams (failure mode 13): every
+    /// opened handle must eventually be retired — the churn soak asserts the
+    /// counters converge, so zombie streams fail CI instead of shipping.
+    static let dedicatedOpened = Locked(0)
+    static let dedicatedRetired = Locked(0)
+
     /// Fired once on terminal close (before streams finish); used by `accept`
     /// to release the pending-inbound retention.
     var onTerminated: (@Sendable () -> Void)?
@@ -311,6 +317,14 @@ final class QUICConnection: PeerConnection, @unchecked Sendable {
 
         switch header.kind {
         case .message, .orderedMessage:
+            Self.dedicatedOpened.withLock { $0 += 1 }
+            defer {
+                // Receiver half of failure mode 13: the stream is spent once
+                // FIN is read (or the read threw); this retire is what
+                // releases the sender's wait.
+                quicRetire(stream)
+                Self.dedicatedRetired.withLock { $0 += 1 }
+            }
             let delivery = deliveryFor(header)
             let sequence = (header.kind == .orderedMessage) ? header.sequence : nil
             var payload = Data()
@@ -322,9 +336,6 @@ final class QUICConnection: PeerConnection, @unchecked Sendable {
             }
             quicDebug("dedicated: yielding data \(payload.count)B")
             eventsContinuation.yield(.data(payload, delivery, sequence: sequence))
-            // Receiver half of failure mode 13: the stream is spent once FIN
-            // is read; this retire is what releases the sender's wait.
-            quicRetire(stream)
 
         case .transferChunk, .appStream:
             let label = header.label ?? ""
@@ -380,10 +391,12 @@ final class QUICConnection: PeerConnection, @unchecked Sendable {
             header = StreamHeaderInfo(kind: .message, label: QUICStreamHeaderCodec.datagramMarker)
         }
         let stream = try await openDedicatedStream(header: header)
+        Self.dedicatedOpened.withLock { $0 += 1 }
         do {
             try await quicSend(stream, payload, isComplete: true)
         } catch {
             quicRetire(stream)  // abort — the peer discards partial reads
+            Self.dedicatedRetired.withLock { $0 += 1 }
             throw error
         }
         // Failure mode 13: retire only once the peer ends the stream (the
@@ -394,6 +407,7 @@ final class QUICConnection: PeerConnection, @unchecked Sendable {
         Task {
             _ = try? await quicReceiveChunk(stream)
             quicRetire(stream)
+            Self.dedicatedRetired.withLock { $0 += 1 }
         }
     }
 
