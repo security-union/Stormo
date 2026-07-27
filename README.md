@@ -35,7 +35,7 @@ typealias file makes it a near-drop-in swap — see
 ## Install
 
 ```swift
-.package(url: "https://github.com/security-union/PeerMesh.git", from: "0.1.0")
+.package(url: "https://github.com/security-union/PeerMesh.git", from: "1.0.0")
 ```
 
 Platforms: iOS 15+ · macOS 12+ · tvOS 15+ · visionOS 1+. Apps need
@@ -53,7 +53,7 @@ imports, one new file, and its peer-ID cache.
 `MPCCompat` products:
 
 ```swift
-.package(url: "https://github.com/security-union/PeerMesh.git", from: "0.1.0")
+.package(url: "https://github.com/security-union/PeerMesh.git", from: "1.0.0")
 ```
 
 **2. Check your `Info.plist`.** Same requirements as MPC:
