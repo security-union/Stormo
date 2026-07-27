@@ -57,7 +57,7 @@ the runtime that reads it are one unit. Bump both together.
   committed. Do NOT hand-edit `Schemas/` or `Sources/PeerMeshProtocol/Generated/`.
 - **Platform floor: iOS 15 / macOS 12** (QUIC floor). No `Duration` (use
   `TimeInterval`). RFC 9221 datagrams are iOS 16/macOS 13, below the floor — see
-  failure mode 1 and the datagram-marker mapping.
+  failure mode 1 and the `StreamKind.Datagram` channel mapping.
 - **PeerID equality is key-hash-only.** Identity IS the key. `displayName` is
   cosmetic and source-dependent (AWDL name-only finds carry placeholders). Never
   add `displayName` to identity/equality/hashing semantics.
@@ -138,8 +138,8 @@ code that guards them without understanding why it exists.
 
 In-code TODOs reference these by name: `// TODO(ledger-name): one line`.
 
-- **datagrams** — real RFC 9221 QUIC datagrams (currently mapped onto a marked
-  reliable stream, floor-compatibility; see `QUICStreamHeaderCodec.datagramMarker`).
+- **datagrams** — real RFC 9221 QUIC datagrams (currently `StreamKind.Datagram`
+  units on the message channel, floor-compatibility).
 - **churn-benchmark** — S-6 formal stream-churn benchmark (nightly CI stub in `ci.yml`).
 - **pairing-code** — `.pairingCode` transcript binding (S-4, DD-2).
 - **compat-nsstream-bridge** — `MPCCompat.startStream` `NSStream` bridge over `PeerByteStream`.

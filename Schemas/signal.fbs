@@ -14,6 +14,8 @@
 // Codegen (flatc version pinned in flake.nix):
 //   flatc --swift -o Sources/PeerMesh/Signaling/Generated Schemas/signal.fbs
 
+include "common.fbs";
+
 namespace PeerMesh.Wire;
 
 /// A session member, as carried in rosters (FR-13).
@@ -60,7 +62,7 @@ table KeepAlive {
 
 /// Announces an incoming resource transfer on a dedicated stream (FR-17).
 table TransferOffer {
-  transfer_id:[ubyte] (id: 0);   // UUID, 16 bytes
+  transfer_id:TransferId (id: 0);
   name:string (id: 1);
   total_bytes:ulong (id: 2);
 }

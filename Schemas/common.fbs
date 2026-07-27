@@ -1,0 +1,14 @@
+// Shared wire scalars (DD-5), included by signal.fbs and stream_header.fbs.
+//
+// Codegen (flatc version pinned in flake.nix, matched exactly by Package.swift):
+//   flatc --swift -o Sources/PeerMeshProtocol/Generated Schemas/*.fbs
+
+namespace PeerMesh.Wire;
+
+/// A 128-bit transfer identifier: the two 8-byte halves of a `uuid_t`, in
+/// memory order. A fixed-size struct — no vector length word, and the
+/// 16-byte contract is enforced by the schema instead of a runtime check.
+struct TransferId {
+  hi:ulong;
+  lo:ulong;
+}

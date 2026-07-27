@@ -70,6 +70,9 @@ public struct StreamHeaderInfo: Sendable, Equatable {
         case transferChunk
         /// `StreamKind.AppStream` — application byte stream (FR-18).
         case appStream
+        /// `StreamKind.Datagram` — unreliable-semantics message (FR-16) on
+        /// the message channel (floor-compatible mapping; TODO(datagrams)).
+        case datagram
     }
 
     public var kind: Kind

@@ -18,8 +18,12 @@ public enum PeerMesh_Wire_StreamKind: UInt8, Enum, Verifiable {
   case transferchunk = 3
   ///  Application-opened named byte stream (FR-18).
   case appstream = 4
+  ///  Unreliable-semantics message (FR-16 `.datagram`) riding the message
+  ///  channel — the floor-compatible mapping; RFC 9221 QUIC datagrams
+  ///  (iOS 16+/macOS 13+) are the latency refinement (TODO datagrams).
+  case datagram = 5
 
-  public static var max: PeerMesh_Wire_StreamKind { return .appstream }
+  public static var max: PeerMesh_Wire_StreamKind { return .datagram }
   public static var min: PeerMesh_Wire_StreamKind { return .unknown }
 }
 
@@ -45,31 +49,29 @@ public struct PeerMesh_Wire_StreamHeader: FlatBufferObject, Verifiable {
   public var kind: PeerMesh_Wire_StreamKind { let o = _accessor.offset(VTOFFSET.kind.v); return o == 0 ? .unknown : PeerMesh_Wire_StreamKind(rawValue: _accessor.readBuffer(of: UInt8.self, at: o)) ?? .unknown }
   ///  Sender-local FIFO sequence, per peer pair. Meaningful for OrderedMessage.
   public var sequence: UInt64 { let o = _accessor.offset(VTOFFSET.sequence.v); return o == 0 ? 0 : _accessor.readBuffer(of: UInt64.self, at: o) }
-  ///  UUID (16 bytes). Meaningful for TransferChunk.
-  public var hasTransferId: Bool { let o = _accessor.offset(VTOFFSET.transferId.v); return o == 0 ? false : true }
-  public var transferIdCount: Int32 { let o = _accessor.offset(VTOFFSET.transferId.v); return o == 0 ? 0 : _accessor.vector(count: o) }
-  public func transferId(at index: Int32) -> UInt8 { let o = _accessor.offset(VTOFFSET.transferId.v); return o == 0 ? 0 : _accessor.directRead(of: UInt8.self, offset: _accessor.vector(at: o) + index * 1) }
-  public var transferId: [UInt8] { return _accessor.getVector(at: VTOFFSET.transferId.v) ?? [] }
-  ///  Stream label. Meaningful for AppStream.
+  ///  Meaningful for TransferChunk.
+  public var transferId: PeerMesh_Wire_TransferId? { let o = _accessor.offset(VTOFFSET.transferId.v); return o == 0 ? nil : _accessor.readBuffer(of: PeerMesh_Wire_TransferId.self, at: o) }
+  public var mutableTransferId: PeerMesh_Wire_TransferId_Mutable? { let o = _accessor.offset(VTOFFSET.transferId.v); return o == 0 ? nil : PeerMesh_Wire_TransferId_Mutable(_accessor.bb, o: o + _accessor.position) }
+  ///  The app-chosen stream name. Meaningful for AppStream.
   public var label: String? { let o = _accessor.offset(VTOFFSET.label.v); return o == 0 ? nil : _accessor.string(at: o) }
   public var labelSegmentArray: [UInt8]? { return _accessor.getVector(at: VTOFFSET.label.v) }
   public static func startStreamHeader(_ fbb: inout FlatBufferBuilder) -> UOffset { fbb.startTable(with: 4) }
   public static func add(kind: PeerMesh_Wire_StreamKind, _ fbb: inout FlatBufferBuilder) { fbb.add(element: kind.rawValue, def: 0, at: VTOFFSET.kind.p) }
   public static func add(sequence: UInt64, _ fbb: inout FlatBufferBuilder) { fbb.add(element: sequence, def: 0, at: VTOFFSET.sequence.p) }
-  public static func addVectorOf(transferId: Offset, _ fbb: inout FlatBufferBuilder) { fbb.add(offset: transferId, at: VTOFFSET.transferId.p) }
+  public static func add(transferId: PeerMesh_Wire_TransferId?, _ fbb: inout FlatBufferBuilder) { guard let transferId = transferId else { return }; fbb.create(struct: transferId, position: VTOFFSET.transferId.p) }
   public static func add(label: Offset, _ fbb: inout FlatBufferBuilder) { fbb.add(offset: label, at: VTOFFSET.label.p) }
   public static func endStreamHeader(_ fbb: inout FlatBufferBuilder, start: UOffset) -> Offset { let end = Offset(offset: fbb.endTable(at: start)); return end }
   public static func createStreamHeader(
     _ fbb: inout FlatBufferBuilder,
     kind: PeerMesh_Wire_StreamKind = .unknown,
     sequence: UInt64 = 0,
-    transferIdVectorOffset transferId: Offset = Offset(),
+    transferId: PeerMesh_Wire_TransferId? = nil,
     labelOffset label: Offset = Offset()
   ) -> Offset {
     let __start = PeerMesh_Wire_StreamHeader.startStreamHeader(&fbb)
     PeerMesh_Wire_StreamHeader.add(kind: kind, &fbb)
     PeerMesh_Wire_StreamHeader.add(sequence: sequence, &fbb)
-    PeerMesh_Wire_StreamHeader.addVectorOf(transferId: transferId, &fbb)
+    PeerMesh_Wire_StreamHeader.add(transferId: transferId, &fbb)
     PeerMesh_Wire_StreamHeader.add(label: label, &fbb)
     return PeerMesh_Wire_StreamHeader.endStreamHeader(&fbb, start: __start)
   }
@@ -78,7 +80,7 @@ public struct PeerMesh_Wire_StreamHeader: FlatBufferObject, Verifiable {
     var _v = try verifier.visitTable(at: position)
     try _v.visit(field: VTOFFSET.kind.p, fieldName: "kind", required: false, type: PeerMesh_Wire_StreamKind.self)
     try _v.visit(field: VTOFFSET.sequence.p, fieldName: "sequence", required: false, type: UInt64.self)
-    try _v.visit(field: VTOFFSET.transferId.p, fieldName: "transferId", required: false, type: ForwardOffset<Vector<UInt8, UInt8>>.self)
+    try _v.visit(field: VTOFFSET.transferId.p, fieldName: "transferId", required: false, type: PeerMesh_Wire_TransferId.self)
     try _v.visit(field: VTOFFSET.label.p, fieldName: "label", required: false, type: ForwardOffset<String>.self)
     _v.finish()
   }

@@ -573,7 +573,7 @@ public actor PeerSession {
             let label = header.label ?? stream.label
             pendingAppStreams[peer, default: []].append((label: label, stream: stream))
             matchAppStream(peer)
-        case .message, .orderedMessage:
+        case .message, .orderedMessage, .datagram:
             // Messages arrive as `.data` connection events, not dedicated streams.
             break
         }

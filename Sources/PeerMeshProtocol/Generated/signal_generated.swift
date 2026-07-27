@@ -308,26 +308,24 @@ public struct PeerMesh_Wire_TransferOffer: FlatBufferObject, Verifiable {
     var p: VOffset { self.rawValue }
   }
 
-  public var hasTransferId: Bool { let o = _accessor.offset(VTOFFSET.transferId.v); return o == 0 ? false : true }
-  public var transferIdCount: Int32 { let o = _accessor.offset(VTOFFSET.transferId.v); return o == 0 ? 0 : _accessor.vector(count: o) }
-  public func transferId(at index: Int32) -> UInt8 { let o = _accessor.offset(VTOFFSET.transferId.v); return o == 0 ? 0 : _accessor.directRead(of: UInt8.self, offset: _accessor.vector(at: o) + index * 1) }
-  public var transferId: [UInt8] { return _accessor.getVector(at: VTOFFSET.transferId.v) ?? [] }
+  public var transferId: PeerMesh_Wire_TransferId? { let o = _accessor.offset(VTOFFSET.transferId.v); return o == 0 ? nil : _accessor.readBuffer(of: PeerMesh_Wire_TransferId.self, at: o) }
+  public var mutableTransferId: PeerMesh_Wire_TransferId_Mutable? { let o = _accessor.offset(VTOFFSET.transferId.v); return o == 0 ? nil : PeerMesh_Wire_TransferId_Mutable(_accessor.bb, o: o + _accessor.position) }
   public var name: String? { let o = _accessor.offset(VTOFFSET.name.v); return o == 0 ? nil : _accessor.string(at: o) }
   public var nameSegmentArray: [UInt8]? { return _accessor.getVector(at: VTOFFSET.name.v) }
   public var totalBytes: UInt64 { let o = _accessor.offset(VTOFFSET.totalBytes.v); return o == 0 ? 0 : _accessor.readBuffer(of: UInt64.self, at: o) }
   public static func startTransferOffer(_ fbb: inout FlatBufferBuilder) -> UOffset { fbb.startTable(with: 3) }
-  public static func addVectorOf(transferId: Offset, _ fbb: inout FlatBufferBuilder) { fbb.add(offset: transferId, at: VTOFFSET.transferId.p) }
+  public static func add(transferId: PeerMesh_Wire_TransferId?, _ fbb: inout FlatBufferBuilder) { guard let transferId = transferId else { return }; fbb.create(struct: transferId, position: VTOFFSET.transferId.p) }
   public static func add(name: Offset, _ fbb: inout FlatBufferBuilder) { fbb.add(offset: name, at: VTOFFSET.name.p) }
   public static func add(totalBytes: UInt64, _ fbb: inout FlatBufferBuilder) { fbb.add(element: totalBytes, def: 0, at: VTOFFSET.totalBytes.p) }
   public static func endTransferOffer(_ fbb: inout FlatBufferBuilder, start: UOffset) -> Offset { let end = Offset(offset: fbb.endTable(at: start)); return end }
   public static func createTransferOffer(
     _ fbb: inout FlatBufferBuilder,
-    transferIdVectorOffset transferId: Offset = Offset(),
+    transferId: PeerMesh_Wire_TransferId? = nil,
     nameOffset name: Offset = Offset(),
     totalBytes: UInt64 = 0
   ) -> Offset {
     let __start = PeerMesh_Wire_TransferOffer.startTransferOffer(&fbb)
-    PeerMesh_Wire_TransferOffer.addVectorOf(transferId: transferId, &fbb)
+    PeerMesh_Wire_TransferOffer.add(transferId: transferId, &fbb)
     PeerMesh_Wire_TransferOffer.add(name: name, &fbb)
     PeerMesh_Wire_TransferOffer.add(totalBytes: totalBytes, &fbb)
     return PeerMesh_Wire_TransferOffer.endTransferOffer(&fbb, start: __start)
@@ -335,7 +333,7 @@ public struct PeerMesh_Wire_TransferOffer: FlatBufferObject, Verifiable {
 
   public static func verify<T>(_ verifier: inout Verifier, at position: Int, of type: T.Type) throws where T: Verifiable {
     var _v = try verifier.visitTable(at: position)
-    try _v.visit(field: VTOFFSET.transferId.p, fieldName: "transferId", required: false, type: ForwardOffset<Vector<UInt8, UInt8>>.self)
+    try _v.visit(field: VTOFFSET.transferId.p, fieldName: "transferId", required: false, type: PeerMesh_Wire_TransferId.self)
     try _v.visit(field: VTOFFSET.name.p, fieldName: "name", required: false, type: ForwardOffset<String>.self)
     try _v.visit(field: VTOFFSET.totalBytes.p, fieldName: "totalBytes", required: false, type: UInt64.self)
     _v.finish()
