@@ -391,29 +391,24 @@ public struct PeerMesh_Wire_Signal: FlatBufferObject, Verifiable {
   public init(_ bb: ByteBuffer, o: Int32) { _accessor = Table(bb: bb, position: o) }
 
   private enum VTOFFSET: VOffset {
-    case protocolVersion = 4
     case bodyType = 6
     case body = 8
     var v: Int32 { Int32(self.rawValue) }
     var p: VOffset { self.rawValue }
   }
 
-  public var protocolVersion: UInt16 { let o = _accessor.offset(VTOFFSET.protocolVersion.v); return o == 0 ? 0 : _accessor.readBuffer(of: UInt16.self, at: o) }
   public var bodyType: PeerMesh_Wire_SignalBody { let o = _accessor.offset(VTOFFSET.bodyType.v); return o == 0 ? .none_ : PeerMesh_Wire_SignalBody(rawValue: _accessor.readBuffer(of: UInt8.self, at: o)) ?? .none_ }
   public func body<T: FlatbuffersInitializable>(type: T.Type) -> T? { let o = _accessor.offset(VTOFFSET.body.v); return o == 0 ? nil : _accessor.union(o) }
   public static func startSignal(_ fbb: inout FlatBufferBuilder) -> UOffset { fbb.startTable(with: 3) }
-  public static func add(protocolVersion: UInt16, _ fbb: inout FlatBufferBuilder) { fbb.add(element: protocolVersion, def: 0, at: VTOFFSET.protocolVersion.p) }
   public static func add(bodyType: PeerMesh_Wire_SignalBody, _ fbb: inout FlatBufferBuilder) { fbb.add(element: bodyType.rawValue, def: 0, at: VTOFFSET.bodyType.p) }
   public static func add(body: Offset, _ fbb: inout FlatBufferBuilder) { fbb.add(offset: body, at: VTOFFSET.body.p) }
   public static func endSignal(_ fbb: inout FlatBufferBuilder, start: UOffset) -> Offset { let end = Offset(offset: fbb.endTable(at: start)); return end }
   public static func createSignal(
     _ fbb: inout FlatBufferBuilder,
-    protocolVersion: UInt16 = 0,
     bodyType: PeerMesh_Wire_SignalBody = .none_,
     bodyOffset body: Offset = Offset()
   ) -> Offset {
     let __start = PeerMesh_Wire_Signal.startSignal(&fbb)
-    PeerMesh_Wire_Signal.add(protocolVersion: protocolVersion, &fbb)
     PeerMesh_Wire_Signal.add(bodyType: bodyType, &fbb)
     PeerMesh_Wire_Signal.add(body: body, &fbb)
     return PeerMesh_Wire_Signal.endSignal(&fbb, start: __start)
@@ -421,7 +416,6 @@ public struct PeerMesh_Wire_Signal: FlatBufferObject, Verifiable {
 
   public static func verify<T>(_ verifier: inout Verifier, at position: Int, of type: T.Type) throws where T: Verifiable {
     var _v = try verifier.visitTable(at: position)
-    try _v.visit(field: VTOFFSET.protocolVersion.p, fieldName: "protocolVersion", required: false, type: UInt16.self)
     try _v.visit(unionKey: VTOFFSET.bodyType.p, unionField: VTOFFSET.body.p, unionKeyName: "bodyType", fieldName: "body", required: false, completion: { (verifier, key: PeerMesh_Wire_SignalBody, pos) in
       switch key {
       case .none_:

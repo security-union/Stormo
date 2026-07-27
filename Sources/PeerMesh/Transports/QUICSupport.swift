@@ -30,6 +30,9 @@ enum QUICError: Error, Sendable, LocalizedError {
     /// A Bonjour `.service` endpoint could not be resolved to a concrete
     /// address for the multiplex-group dial (failure mode 12).
     case serviceResolutionFailed
+    /// The peer speaks a different protocol major version (PeerHello semver
+    /// gate — same-major interop).
+    case protocolVersionMismatch(local: ProtocolVersion, remote: ProtocolVersion)
 
     // NSError bridging renumbers payload cases (tlsIdentityUnavailable
     // surfaces as "error 0"), hiding the diagnostic string entirely —
@@ -45,6 +48,11 @@ enum QUICError: Error, Sendable, LocalizedError {
         case .listenerFailed(let reason): return "PeerMesh QUIC: listener failed — \(reason)"
         case .serviceResolutionFailed:
             return "PeerMesh QUIC: Bonjour service endpoint did not resolve"
+        case .protocolVersionMismatch(let local, let remote):
+            let hint = remote.major > local.major
+                ? "this device needs an app upgrade"
+                : "the peer needs an app upgrade"
+            return "PeerMesh QUIC: protocol version mismatch — local \(local), peer \(remote); \(hint)"
         }
     }
 }
@@ -315,18 +323,28 @@ func quicPeerCertificateDER(_ connection: NWConnection) -> Data? {
 /// cross-checked against the TLS-authenticated certificate, and `displayName` is
 /// cosmetic (never used for trust — see ``PeerID``).
 enum PeerHello {
-    static func encode(_ peer: PeerID) -> Data {
+    struct Decoded {
+        let peer: PeerID
+        let version: ProtocolVersion
+    }
+
+    static func encode(_ peer: PeerID, version: ProtocolVersion = .current) -> Data {
         var fbb = FlatBufferBuilder(initialSize: 128)
         let keyHash = fbb.createVector(bytes: peer.keyHash)
         let name = fbb.create(string: peer.displayName)
         let info = WirePeerInfo.createPeerInfo(
             &fbb, keyHashVectorOffset: keyHash, displayNameOffset: name)
-        let root = PeerMesh_Wire_PeerHello.createPeerHello(&fbb, peerOffset: info)
+        let root = PeerMesh_Wire_PeerHello.createPeerHello(
+            &fbb,
+            peerOffset: info,
+            protocolMajor: version.major,
+            protocolMinor: version.minor,
+            protocolPatch: version.patch)
         fbb.finish(offset: root)
         return Data(fbb.sizedByteArray)
     }
 
-    static func decode(_ data: Data) -> PeerID? {
+    static func decode(_ data: Data) -> Decoded? {
         var buffer = ByteBuffer(data: data)
         guard
             let root: PeerMesh_Wire_PeerHello = try? getCheckedRoot(
@@ -335,7 +353,20 @@ enum PeerHello {
         else { return nil }
         // WirePeerInfo.peerID enforces the 34-byte multihash contract — a
         // validation the hand-rolled predecessor of this codec never had.
-        return root.peer?.peerID
+        guard let peer = root.peer?.peerID else { return nil }
+        return Decoded(
+            peer: peer,
+            version: ProtocolVersion(
+                major: root.protocolMajor, minor: root.protocolMinor, patch: root.protocolPatch))
+    }
+}
+
+/// Same-major interop gate, applied by both sides right after hello decode.
+/// The error names both versions so the app can render "upgrade this device"
+/// (remote is newer) vs "peer must upgrade" (remote is older).
+func quicRequireCompatibleVersion(_ remote: ProtocolVersion) throws {
+    guard ProtocolVersion.current.isCompatible(with: remote) else {
+        throw QUICError.protocolVersionMismatch(local: .current, remote: remote)
     }
 }
 

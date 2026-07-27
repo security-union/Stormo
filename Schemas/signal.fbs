@@ -82,7 +82,10 @@ union SignalBody {
 /// Envelope for every control-plane message (DD-5 rule 1). Size-prefixed on
 /// the wire. Unknown body variants are ignored-and-logged, never fatal (QA-11).
 table Signal {
-  protocol_version:ushort (id: 0);
+  /// Deprecated (pre-0.1.0): the protocol version is a connection property,
+  /// carried once as semver in PeerHello (peer_hello.fbs) — not per-envelope.
+  /// Field id 0 stays reserved per the append-only discipline.
+  protocol_version:ushort (id: 0, deprecated);
   body:SignalBody (id: 2);  // id 1 is the implicit body_type field
 }
 

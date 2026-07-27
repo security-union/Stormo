@@ -12,9 +12,6 @@ public enum SignalCodec {
     /// contexts larger than this are chunked.
     public static let maxControlMessageSize = 64 * 1024
 
-    /// Protocol version stamped into every `Signal` envelope (QA-11).
-    public static let protocolVersion: UInt16 = 1
-
     /// Wire bytes for a signal. Size-prefix framing is applied by the driver.
     public static func encode(_ signal: Signal) -> Data {
         signal.encoded

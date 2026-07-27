@@ -155,7 +155,6 @@ public struct Signal: @unchecked Sendable, Equatable {
         let bodyOffset = makeBody(&fbb)
         let rootOffset = WireSignal.createSignal(
             &fbb,
-            protocolVersion: SignalCodec.protocolVersion,
             bodyType: bodyType,
             bodyOffset: bodyOffset)
         fbb.finish(offset: rootOffset)

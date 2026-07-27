@@ -132,12 +132,13 @@ final class QUICConnection: PeerConnection, @unchecked Sendable {
         quicDebug("dial: sent hello")
         let helloFrame = try await quicReceiveFrame(control)
         quicDebug("dial: got hello")
+        guard let hello = PeerHello.decode(helloFrame) else { throw QUICError.malformedStreamHeader }
+        try quicRequireCompatibleVersion(hello.version)
         // Adopt the peer's real display name: AWDL name-only discovery dials
         // with a hash-prefix placeholder (PeerID equality is key-hash-only, so
         // this is purely cosmetic enrichment).
-        if let hello = PeerHello.decode(helloFrame), hello.keyHash == remote.keyHash {
-            connection.remotePeerBox.value = PeerID(
-                keyHash: hello.keyHash, displayName: hello.displayName)
+        if hello.peer.keyHash == remote.keyHash {
+            connection.remotePeerBox.value = hello.peer
         }
 
         connection.startControlReadLoop(control)
@@ -213,11 +214,12 @@ final class QUICConnection: PeerConnection, @unchecked Sendable {
 
         let helloFrame = try await quicReceiveFrame(control)
         guard let hello = PeerHello.decode(helloFrame) else { throw QUICError.malformedStreamHeader }
+        try quicRequireCompatibleVersion(hello.version)
         if let certKeyHash {
-            guard certKeyHash == hello.keyHash else { throw QUICError.identityMismatch }
+            guard certKeyHash == hello.peer.keyHash else { throw QUICError.identityMismatch }
         }
-        remotePeerBox.value = PeerID(keyHash: hello.keyHash, displayName: hello.displayName)
-        remoteKeyHashBox.value = certKeyHash ?? hello.keyHash
+        remotePeerBox.value = hello.peer
+        remoteKeyHashBox.value = certKeyHash ?? hello.peer.keyHash
 
         try await controlWriter.send(control, tag: nil, frame: PeerHello.encode(localPeer))
         startControlReadLoop(control)

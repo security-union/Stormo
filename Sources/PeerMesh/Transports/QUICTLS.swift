@@ -50,6 +50,9 @@ final class QUICLocalIdentity: @unchecked Sendable {
 /// verify block; the certificate chain is never trusted on its own.
 enum QUICTLS {
 
+    /// FROZEN. Version gating is the PeerHello semver (same-major interop) —
+    /// bumping the ALPN would fail the handshake before hello, turning a
+    /// diagnosable "upgrade required" into an opaque connect failure.
     static let alpn = "peermesh/1"
 
     /// Forms the local `sec_identity_t`.
