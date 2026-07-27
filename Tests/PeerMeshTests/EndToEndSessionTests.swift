@@ -137,6 +137,31 @@ struct EndToEndSessionTests {
         await camera.disconnect()
     }
 
+    @Test("Datagram sends over the cap throw datagramTooLarge; at the cap they pass the guard")
+    func datagramCap() async throws {
+        let hub = InMemoryTransport.Hub()
+        let identity = PeerIdentity(name: "Capped")
+        let session = PeerSession(
+            identity: identity,
+            service: "_e2e._udp",
+            transport: InMemoryTransport(hub: hub))
+
+        let oversized = Data(repeating: 0xD8, count: Delivery.maxDatagramPayload + 1)
+        await #expect(throws: PeerMeshError.datagramTooLarge(
+            bytes: Delivery.maxDatagramPayload + 1, limit: Delivery.maxDatagramPayload)
+        ) {
+            try await session.send(oversized, delivery: .datagram)
+        }
+
+        // Exactly at the cap: passes the size guard (then fails on membership,
+        // proving the guard, not the payload, was the gate above).
+        await #expect(throws: PeerMeshError.peerUnreachable(identity.id)) {
+            try await session.send(
+                Data(repeating: 0xD8, count: Delivery.maxDatagramPayload), delivery: .datagram)
+        }
+        await session.disconnect()
+    }
+
     @Test("Send with no members throws peerUnreachable")
     func sendWithoutMembers() async throws {
         let hub = InMemoryTransport.Hub()

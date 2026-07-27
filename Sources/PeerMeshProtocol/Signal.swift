@@ -212,6 +212,11 @@ public typealias WireStreamKind = PeerMesh_Wire_StreamKind
 
 /// Delivery semantics for data (FR-15, FR-16, DD-7).
 public enum Delivery: Sendable, Equatable {
+    /// The `.datagram` payload cap (FR-16, sender-visible). QUIC DATAGRAM
+    /// frames cannot fragment, so a datagram is bounded by path MTU; 1200 is
+    /// the conservative floor across IPv4/IPv6 paths. Enforced at `send`.
+    public static let maxDatagramPayload = 1_200
+
     /// Guaranteed delivery on a dedicated unidirectional QUIC stream per
     /// message (MoQ pattern, DD-7). Ordering across messages is NOT
     /// guaranteed — messages never head-of-line-block each other.
@@ -220,7 +225,10 @@ public enum Delivery: Sendable, Equatable {
     /// (`StreamHeader.sequence` + receiver reorder buffer). MPC behavioral
     /// parity; `MPCCompat` maps MCSession's `.reliable` here.
     case reliableOrdered
-    /// Low-latency QUIC datagram (RFC 9221); droppable, unordered.
+    /// Droppable, unordered, low-latency — true datagram semantics, so the
+    /// payload must fit one datagram: sends over ``maxDatagramPayload`` throw
+    /// ``PeerMeshError/datagramTooLarge(bytes:limit:)``. For larger droppable
+    /// data, send `.reliable` and supersede at the application layer.
     case datagram
 }
 
@@ -246,6 +254,9 @@ public enum PeerMeshError: Error, Sendable, Equatable {
     /// concurrent invitation per peer (FR-6).
     case invitationAlreadyPending(PeerID)
     case peerUnreachable(PeerID)
+    /// A `.datagram` send exceeded ``Delivery/maxDatagramPayload`` (FR-16):
+    /// datagrams cannot fragment. Use `.reliable` for payloads this size.
+    case datagramTooLarge(bytes: Int, limit: Int)
     /// Inbound signaling failed FlatBuffers verification (DD-5 rule 3).
     case malformedSignal
     /// A resource transfer ended before all announced bytes arrived — sender
@@ -254,4 +265,33 @@ public enum PeerMeshError: Error, Sendable, Equatable {
     /// A per-peer ordered-message reorder buffer exceeded its cap; the peer is
     /// reordering beyond what a reliable transport can justify (DD-7).
     case reorderBufferOverflow
+}
+
+// NSError bridging renumbers payload cases (failure mode 11) — LocalizedError
+// keeps the diagnostic in localizedDescription.
+extension PeerMeshError: LocalizedError {
+    public var errorDescription: String? {
+        switch self {
+        case .unimplemented(let surface):
+            return "PeerMesh: \(surface) is not implemented"
+        case .localNetworkPermissionDenied:
+            return "PeerMesh: Local Network permission denied"
+        case .invitationTimedOut:
+            return "PeerMesh: invitation timed out"
+        case .invitationDeclined:
+            return "PeerMesh: invitation declined"
+        case .invitationAlreadyPending(let peer):
+            return "PeerMesh: an invitation to \(peer.displayName) is already pending"
+        case .peerUnreachable(let peer):
+            return "PeerMesh: peer \(peer.displayName) is unreachable"
+        case .datagramTooLarge(let bytes, let limit):
+            return "PeerMesh: .datagram payload is \(bytes) bytes; datagrams cannot exceed \(limit) bytes (they never fragment) — use .reliable for payloads this size"
+        case .malformedSignal:
+            return "PeerMesh: inbound signal failed verification"
+        case .resourceTransferIncomplete:
+            return "PeerMesh: resource transfer ended before all bytes arrived"
+        case .reorderBufferOverflow:
+            return "PeerMesh: ordered-message reorder buffer overflowed"
+        }
+    }
 }

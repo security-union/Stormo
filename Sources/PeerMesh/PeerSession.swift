@@ -181,6 +181,11 @@ public actor PeerSession {
         to recipients: Recipients = .all,
         delivery: Delivery = .reliable
     ) async throws {
+        // FR-16: datagrams never fragment, so the cap is part of the contract.
+        if delivery == .datagram, payload.count > Delivery.maxDatagramPayload {
+            throw PeerMeshError.datagramTooLarge(
+                bytes: payload.count, limit: Delivery.maxDatagramPayload)
+        }
         guard !engine.members.isEmpty else { throw PeerMeshError.peerUnreachable(identity.id) }
         run(.command(.send(payload, to: recipients, delivery: delivery)))
     }

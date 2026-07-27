@@ -64,7 +64,7 @@ Priority: **M** = must (1.0), **S** = should (1.x), **C** = could (post-1.0).
 ### 3.4 Data Exchange
 
 - **FR-15 (M)** **Reliable messaging:** back-pressured message send to one, a subset, or all session peers (messages up to 16 MB; larger payloads directed to FR-17), carried as framed `StreamHeader` + payload units on the persistent per-direction **message channel** (DD-7 hardware amendment; payloads > 1 MiB ride a dedicated stream per message). Two reliable modes: `.reliable` (default; delivery guaranteed, ordering across messages not guaranteed) and `.reliableOrdered` (FIFO per sender–receiver pair via sequence numbers; MPC behavioral parity, used by `MPCCompat`).
-- **FR-16 (M)** **Unreliable messaging:** low-latency datagram send (QUIC datagrams, RFC 9221) with sender-visible max payload size; silently droppable, unordered.
+- **FR-16 (M)** **Unreliable messaging:** low-latency datagram send; silently droppable, unordered, and **capped at `Delivery.maxDatagramPayload` (1200 bytes)** — datagrams never fragment, and sends over the cap throw `datagramTooLarge` directing callers to `.reliable`. Larger droppable data is an application-layer concern (supersede over `.reliable`). `MPCCompat` degrades oversized MPC `.unreliable` sends to `.reliable` (unordered) — MPC allowed them only via fragile IP fragmentation.
 - **FR-17 (M)** **Resource transfer:** file/URL transfer to a peer with **live byte-counting `Progress` on BOTH ends** — the sender's returned `Progress` advances as chunks are written (back-pressured), the receiver's as bytes land; `MPCCompat.sendResource` returns the sender's `Progress` with `MCSession` unit semantics (total = file bytes), so existing progress-bar code works unchanged. Cancellation from either `Progress`; bounded memory (streaming from/to disk, never whole-file in memory); a dedicated QUIC stream per transfer so bulk transfers never head-of-line-block messaging.
 - **FR-18 (M)** **Byte streams:** application-opened named bidirectional streams exposed as `AsyncSequence<Data>` + async writer with explicit back-pressure; each maps to its own QUIC stream. (`NSStream` bridging only via `MPCCompat`, FR-24.)
 
@@ -125,7 +125,7 @@ One QUIC connection per peer pair carries everything:
 |---|---|
 | Control plane (invitation, roster gossip, keepalive, topology election) | Bidirectional **control stream 0** (persistent — signaling requires total order), size-prefixed **FlatBuffers** signal messages (DD-5) |
 | Reliable messages (FR-15) | Framed `StreamHeader` + payload units on the persistent per-direction **message channel** (DD-7 hardware amendment); payloads > 1 MiB ride a dedicated stream |
-| Unreliable messages (FR-16) | **QUIC datagrams** (RFC 9221; below the iOS 16/macOS 13 availability they ride the message channel with a datagram marker) |
+| Unreliable messages (FR-16) | ≤ 1200-byte payloads only (enforced — datagrams never fragment): `StreamKind.Datagram` units on the message channel today; RFC 9221 datagrams (iOS 16+/macOS 13+) are the latency refinement |
 | Resource transfers (FR-17) | One unidirectional stream per transfer (`StreamHeader.kind = transferChunk`) — native per-stream flow control, no head-of-line blocking of messages |
 | App byte streams (FR-18) | One bidirectional stream each (`StreamHeader.kind = appStream`) |
 | Encryption (FR-19) | TLS 1.3, mandatory, connection-level |
