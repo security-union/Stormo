@@ -68,7 +68,11 @@ public final class QUICTransport: PeerTransport, @unchecked Sendable {
     private let inboundContinuation: AsyncStream<any PeerConnection>.Continuation
 
     private let configuration: Configuration
-    private let queue = DispatchQueue(label: "dev.securityunion.peermesh.quic")
+    /// All Network.framework work for this transport — listener, browsers,
+    /// every stream's callbacks — runs here, never on main. `.userInitiated`:
+    /// the frame path is interactive; default QoS gets deprioritized under
+    /// system load.
+    private let queue = DispatchQueue(label: "dev.securityunion.peermesh.quic", qos: .userInitiated)
 
     // Advertiser state.
     private let listenerBox = Locked<NWListener?>(nil)
