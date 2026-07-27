@@ -5,19 +5,40 @@ on:
     branches: [main]
   pull_request:
 
+# Superseded runs stop immediately — rapid push cadence must not stack
+# billed macOS runners.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 # Test strategy (design doc DD-6):
 #   Tier 1 (engine, sans-I/O) + Tier 2 (loopback QUIC integration) run here on
-#   every commit, on every Apple target we ship. Tier 3 (AWDL/peer-to-peer
-#   Wi-Fi hardware matrix) is a release gate on the physical device lab and is
-#   NOT represented in this workflow.
+#   every commit. Tier 3 (AWDL/peer-to-peer Wi-Fi hardware matrix) is a
+#   release gate on the physical device lab and is NOT represented here.
+#
+# Cost notes (macOS bills at 10x Linux):
+#   - The E2E script runs as a step of the macOS job — it reuses .build
+#     instead of paying a second macOS runner for a duplicate compile.
+#   - FlatBuffers drift runs on Linux: flatc + diff needs no Apple frameworks.
+#   - Mac Catalyst runs on main pushes only; the iOS Simulator job is the
+#     PR-time floor/destination check (it is the one that catches
+#     availability-floor breaks).
 
 jobs:
-  # Fast loop: native macOS via SwiftPM, with coverage (QA-8 ≥ 85% non-radio).
+  # Fast loop: native macOS via SwiftPM, with coverage (QA-8 ≥ 85% non-radio),
+  # then the cross-process Bonjour+QUIC E2E on the same build products.
   macos-native:
-    name: macOS (swift test + coverage)
+    name: macOS (swift test + coverage + E2E)
     runs-on: macos-15
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
+      - name: Cache SwiftPM build
+        uses: actions/cache@v4
+        with:
+          path: .build
+          key: spm-${{ runner.os }}-${{ hashFiles('Package.swift') }}
+          restore-keys: spm-${{ runner.os }}-
       - name: Run tests with coverage
         run: swift test --enable-code-coverage
         env:
@@ -42,20 +63,27 @@ jobs:
           XCTEST=$(find "$BIN_PATH" -name '*.xctest' | head -1)
           xcrun llvm-cov report "$XCTEST/Contents/MacOS/$(basename "$XCTEST" .xctest)" \
             -instr-profile "$PROF" -ignore-filename-regex '(Tests|Generated)/' || true
+      # Tier 2.5: cross-process exchange over the production Bonjour+QUIC
+      # path — the rung that caught the FIN and inbound-retention bugs.
+      # Reuses this job's .build (the script's `swift build` is incremental).
+      - name: Cross-process Bonjour+QUIC E2E
+        run: ./Scripts/e2e-cli.sh
+        env:
+          QUIC_DEBUG: "1"
+          PEERMESH_NO_P2P: "1"
 
-  # Same test bundles executed per Apple destination (the swift-nio / TCA /
-  # Apple-packages pattern): one suite, N platforms.
+  # Same test bundle per Apple destination. iOS Simulator runs on PRs (the
+  # availability-floor check); Mac Catalyst only on pushes to main.
   platform-matrix:
     name: ${{ matrix.name }}
     runs-on: macos-15
+    timeout-minutes: 40
     strategy:
       fail-fast: false
       matrix:
         include:
           - name: iOS Simulator
             destination: auto-ios # resolved at runtime against the runner's simulators
-          - name: Mac Catalyst
-            destination: platform=macOS,variant=Mac Catalyst
     steps:
       - uses: actions/checkout@v4
       - name: Resolve destination
@@ -78,18 +106,35 @@ jobs:
             -destination '${{ steps.dest.outputs.destination }}' \
             | grep -vE '^\s*$' | tail -50
 
+  mac-catalyst:
+    name: Mac Catalyst
+    if: github.event_name == 'push'
+    runs-on: macos-15
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - name: Test
+        run: |
+          set -o pipefail
+          xcodebuild test \
+            -scheme PeerMesh-Package \
+            -destination 'platform=macOS,variant=Mac Catalyst' \
+            | grep -vE '^\s*$' | tail -50
+
   # DD-5 rule 4: committed generated code must match the pinned flatc output.
+  # Linux runner: flatc + diff needs no Apple frameworks, and macOS bills 10x.
   flatbuffers-drift:
     name: FlatBuffers codegen drift
-    runs-on: macos-15
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
       - name: Install pinned flatc
         # Exact-version pin rule (CLAUDE.md): flatc MUST equal the FlatBuffers
-        # runtime pinned in Package.swift. brew would install latest and drift.
+        # runtime pinned in Package.swift.
         run: |
           curl -fsSL -o /tmp/flatc.zip \
-            https://github.com/google/flatbuffers/releases/download/v25.2.10/Mac.flatc.binary.zip
+            https://github.com/google/flatbuffers/releases/download/v25.2.10/Linux.flatc.binary.clang++-18.zip
           unzip -o /tmp/flatc.zip -d /tmp/flatc-bin
           /tmp/flatc-bin/flatc --version | grep -F '25.2.10'
       - name: Regenerate and diff
@@ -100,34 +145,3 @@ jobs:
 
 # TODO(S-6): nightly workflow_dispatch job — stream-churn benchmark and 32-peer
 # mesh simulation with timing budgets (QA-2, QA-8).
-
-  # Tier 2.5: cross-process exchange over the production Bonjour+QUIC path —
-  # two real processes, real mDNS, real QUIC. The rung that caught the FIN
-  # and inbound-retention bugs.
-  cross-process-e2e:
-    name: Cross-process Bonjour+QUIC E2E
-    runs-on: macos-15
-    steps:
-      - uses: actions/checkout@v4
-      - name: Run E2E script
-        run: ./Scripts/e2e-cli.sh
-        env:
-          QUIC_DEBUG: "1"
-          # Same-machine host+joiner — see failure mode 10.
-          PEERMESH_NO_P2P: "1"
-      - name: Crash backtrace on failure (joiner under lldb)
-        if: failure()
-        env:
-          PEERMESH_NO_P2P: "1"
-        run: |
-          # The joiner SIGTRAPs dialing a Bonjour .service endpoint on runner
-          # VMs with no visible crash report; reproduce under lldb for a stack.
-          BIN="$(swift build --show-bin-path)/peermesh-cli"
-          "$BIN" host --name BTHost --service _pmbt1._udp --timeout 45 --once \
-            > /tmp/bt-host.log 2>&1 &
-          sleep 2
-          lldb -b -o run -o 'bt all' -o quit -- \
-            "$BIN" join --name BTJoin --service _pmbt1._udp \
-            --peer BTHost --send bt-ping 2>&1 | tail -100
-          echo "--- fault-level unified log ---"
-          log show --last 3m --predicate 'messageType == fault' --style compact 2>/dev/null | tail -30 || true
