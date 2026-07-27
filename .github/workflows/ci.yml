@@ -77,7 +77,9 @@ jobs:
   platform-matrix:
     name: ${{ matrix.name }}
     runs-on: macos-15
-    timeout-minutes: 40
+    # Healthy runs finish in 2.5-4 min; a hung xcodebuild otherwise bills the
+    # full cap (a stuck run burned 40 macOS-minutes on 2026-07-27).
+    timeout-minutes: 10
     strategy:
       fail-fast: false
       matrix:
@@ -101,16 +103,19 @@ jobs:
       - name: Test
         run: |
           set -o pipefail
+          # xcbeautify streams progress live — a hung xcodebuild shows where
+          # it stalled instead of buffering silently until the timeout.
           xcodebuild test \
             -scheme PeerMesh-Package \
             -destination '${{ steps.dest.outputs.destination }}' \
-            | grep -vE '^\s*$' | tail -50
+            | xcbeautify --renderer github-actions
 
   mac-catalyst:
     name: Mac Catalyst
     if: github.event_name == 'push'
     runs-on: macos-15
-    timeout-minutes: 40
+    # Same suite/shape as platform-matrix — same 10-min cap rationale.
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - name: Test
@@ -119,7 +124,7 @@ jobs:
           xcodebuild test \
             -scheme PeerMesh-Package \
             -destination 'platform=macOS,variant=Mac Catalyst' \
-            | grep -vE '^\s*$' | tail -50
+            | xcbeautify --renderer github-actions
 
   # DD-5 rule 4: committed generated code must match the pinned flatc output.
   # Linux runner: flatc + diff needs no Apple frameworks, and macOS bills 10x.
