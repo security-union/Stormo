@@ -144,6 +144,19 @@ func quicFinish(_ connection: NWConnection) async {
     }
 }
 
+/// Enable QUIC-level keepalive (PING frames) on the tunnel via an
+/// established stream's metadata. PINGs hold NAT/middlebox state, assert
+/// AWDL interface use (failure mode 9), and — paired with the tightened
+/// idle timeout — turn an unresponsive peer into a connection failure in
+/// seconds, all without app-level traffic.
+func quicEnableKeepalive(_ connection: NWConnection, seconds: Int) {
+    guard
+        let metadata = connection.metadata(definition: NWProtocolQUIC.definition)
+            as? NWProtocolQUIC.Metadata
+    else { return }
+    metadata.keepAlive = .seconds(seconds)
+}
+
 /// Deliberate local close of a spent stream. Detaches the state observer
 /// FIRST: inbound streams carry a failure observer that treats `.cancelled`
 /// as a transport failure and closes the whole connection — a bare `cancel`

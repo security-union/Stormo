@@ -98,8 +98,11 @@ code that guards them without understanding why it exists.
    `.bonjour` (AWDL-capable; PeerID from the instance name) + TXT browse as
    enrichment. Consumers must treat `.found` and `.updated` uniformly.
 9. **AWDL requires foreground + screen on.** Idle-looking links get torn down by
-   iOS 26 (the bug that killed MPC). Keepalives exist to assert interface use and
-   hold the QUIC idle timeout.
+   iOS 26 (the bug that killed MPC). Two keepalive layers assert interface use
+   and hold the 15 s idle timeout: QUIC-level PINGs every 5 s
+   (`quicEnableKeepalive`, no app traffic, also = fast dead-peer detection at
+   ~3 missed PINGs) and the engine's keepAlive signals — the engine layer
+   stays until PING-only AWDL assertion is validated on hardware.
 10. **`includePeerToPeer` breaks same-machine self-dials.** Use
     `PEERMESH_NO_P2P=1` for in-process tests; CI sets it for every
     same-machine job. Note `ProcessInfo.environment` caches at first access;

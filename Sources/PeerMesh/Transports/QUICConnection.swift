@@ -153,6 +153,7 @@ final class QUICConnection: PeerConnection, @unchecked Sendable {
             connection.remotePeerBox.value = hello.peer
         }
 
+        quicEnableKeepalive(control, seconds: QUICTLS.keepaliveSeconds)
         connection.startControlReadLoop(control)
         connection.observeGroupTermination()
         return connection
@@ -234,6 +235,7 @@ final class QUICConnection: PeerConnection, @unchecked Sendable {
         remoteKeyHashBox.value = certKeyHash ?? hello.peer.keyHash
 
         try await controlWriter.send(control, tag: nil, frame: PeerHello.encode(localPeer))
+        quicEnableKeepalive(control, seconds: QUICTLS.keepaliveSeconds)
         startControlReadLoop(control)
     }
 
