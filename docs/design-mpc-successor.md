@@ -463,6 +463,19 @@ the 5 s keepalives ride the control stream; and a captured full-resolution
 video handed off via `sendResource` streams on its own dedicated stream so it
 never delays a single preview frame (QA-4).
 
+**Stream census.** Per peer pair, stream count is bounded and traffic-independent:
+exactly one control stream (dialer-opened at handshake, lives for the
+connection); zero to two message channels (one per direction, opened lazily on
+each side's first send, then permanent); and dedicated streams only per active
+use — one per oversized message (retired in seconds), one per in-flight
+resource transfer, one per open app byte stream. **Steady state is 3 streams**
+no matter how long the session runs or how many messages flow — messages are
+framed units *inside* the channels, so message count never changes stream
+count (the property that failure mode 13 made mandatory). A session's ceiling
+is 3 + concurrent transfers/app streams. In a mesh, multiply by peers, not by
+traffic: each device holds N−1 connections × ~3 streams — a full 32-peer mesh
+is ~93 mostly-idle streams per device, static at any frame rate.
+
 **TLS roles and mutual authentication (FR-19..FR-22, DD-2):**
 
 The advertiser is the QUIC/TLS **server**, the inviter the **client** — but the
