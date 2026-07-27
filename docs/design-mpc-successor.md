@@ -426,6 +426,26 @@ In the default `fullMesh(maxPeers: 32)` topology (DD-3) each pair holds one
 connection, so a device carries at most N−1 connections; `.hostRelay` reduces
 that to 1 for non-host members.
 
+**Which traffic rides which stream:**
+
+Every peer pair shares one QUIC connection carrying three stream classes,
+each self-identified by its first byte (the stream tag):
+
+| Traffic | Stream | Tag |
+|---|---|---|
+| **App messages** — video frames, game state, anything via `send(_:delivery:)`, up to 1 MiB, all delivery modes | the sender's **message channel**: one long-lived stream per direction, framed `StreamHeader` + payload units | `0x02` |
+| **App messages over 1 MiB** (FR-15 allows 16 MB) | a **dedicated stream** per message, retired when spent | `0x01` |
+| **PeerMesh's own protocol** — `PeerHello`, invitations, accept/decline, roster gossip, keepalives, transfer offers, stream-open announcements | the **control stream**: one bidirectional stream, dialer-opened first, total order (DD-5) | `0x00` |
+| **File transfers** (`sendResource`, FR-17) | offer/accept signals on the control stream; the bytes on a **dedicated stream** per transfer (disk-to-disk, own flow control) | `0x00` + `0x01` |
+| **App byte streams** (`openStream`, FR-18) | a **dedicated stream** each, duplex, app-controlled lifetime | `0x01` |
+
+Concretely, in remote-shutter: the 33 fps camera preview (~4.5 KB frames)
+rides the camera→monitor message channel; shutter commands and zoom ride the
+monitor→camera message channel; the invitation that started the session and
+the 5 s keepalives ride the control stream; and a captured full-resolution
+video handed off via `sendResource` streams on its own dedicated stream so it
+never delays a single preview frame (QA-4).
+
 **TLS roles and mutual authentication (FR-19..FR-22, DD-2):**
 
 The advertiser is the QUIC/TLS **server**, the inviter the **client** — but the
