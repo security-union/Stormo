@@ -138,8 +138,13 @@ code that guards them without understanding why it exists.
 
 In-code TODOs reference these by name: `// TODO(ledger-name): one line`.
 
-- **datagrams** — real RFC 9221 QUIC datagrams (currently `StreamKind.Datagram`
-  units on the message channel, floor-compatibility).
+- **datagrams** — real RFC 9221 QUIC datagrams for SUB-MTU payloads only
+  (~1.2 KB; DATAGRAM frames cannot fragment). Larger .datagram sends —
+  remote-shutter's ~4.5 KB preview stills — stay on the message channel as
+  `StreamKind.Datagram` units: sender-side credit windows give latest-wins
+  there, and MPC's 64 KB unreliable sends only worked via fragile IP
+  fragmentation QUIC deliberately dropped. Implementation must route by
+  size, never map .datagram → 9221 unconditionally.
 - **churn-benchmark** — S-6 formal stream-churn benchmark (nightly CI stub in `ci.yml`).
 - **pairing-code** — `.pairingCode` transcript binding (S-4, DD-2).
 - **compat-nsstream-bridge** — `MPCCompat.startStream` `NSStream` bridge over `PeerByteStream`.
