@@ -265,6 +265,13 @@ struct MPCCompatE2ETests {
             break
         }
 
+        // Sender-side progress bar (MCSession parity): the returned Progress
+        // must count BYTES and end complete — not a 0-or-1 proxy.
+        let senderProgress = try #require(progress)
+        #expect(senderProgress.totalUnitCount == Int64(payload.count))
+        #expect(senderProgress.completedUnitCount == Int64(payload.count))
+        #expect(senderProgress.fractionCompleted == 1.0)
+
         sessionB.disconnect()
         sessionA.disconnect()
     }

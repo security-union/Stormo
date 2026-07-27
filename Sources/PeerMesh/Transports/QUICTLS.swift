@@ -50,6 +50,12 @@ final class QUICLocalIdentity: @unchecked Sendable {
 /// verify block; the certificate chain is never trusted on its own.
 enum QUICTLS {
 
+    /// QUIC PING interval, seconds — enabled per connection on both sides
+    /// (`quicEnableKeepalive`). Engine-level keepalive signals remain until
+    /// PING-only interface assertion is validated on AWDL hardware (failure
+    /// mode 9 was proven with engine keepalives).
+    static let keepaliveSeconds = 5
+
     /// FROZEN. Version gating is the PeerHello semver (same-major interop) —
     /// bumping the ALPN would fail the handshake before hello, turning a
     /// diagnosable "upgrade required" into an opaque connect failure.
@@ -192,7 +198,11 @@ enum QUICTLS {
         isListener: Bool
     ) -> NWParameters {
         let quic = NWProtocolQUIC.Options(alpn: [alpn])
-        quic.idleTimeout = 30_000
+        // 15 s idle + 5 s transport keepalive (``QUICTLS/keepaliveSeconds``):
+        // a healthy tunnel never idles (PING every 5 s), so idling out means
+        // ~3 missed keepalives — a dead peer surfaces as a connection failure
+        // in seconds instead of half a minute.
+        quic.idleTimeout = 15_000
         quic.initialMaxData = 1 << 24
         quic.initialMaxStreamDataBidirectionalLocal = 1 << 20
         quic.initialMaxStreamDataBidirectionalRemote = 1 << 20

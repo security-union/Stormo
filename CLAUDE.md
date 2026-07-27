@@ -57,7 +57,7 @@ the runtime that reads it are one unit. Bump both together.
   committed. Do NOT hand-edit `Schemas/` or `Sources/PeerMeshProtocol/Generated/`.
 - **Platform floor: iOS 15 / macOS 12** (QUIC floor). No `Duration` (use
   `TimeInterval`). RFC 9221 datagrams are iOS 16/macOS 13, below the floor — see
-  failure mode 1 and the datagram-marker mapping.
+  failure mode 1 and the `StreamKind.Datagram` channel mapping.
 - **PeerID equality is key-hash-only.** Identity IS the key. `displayName` is
   cosmetic and source-dependent (AWDL name-only finds carry placeholders). Never
   add `displayName` to identity/equality/hashing semantics.
@@ -98,8 +98,11 @@ code that guards them without understanding why it exists.
    `.bonjour` (AWDL-capable; PeerID from the instance name) + TXT browse as
    enrichment. Consumers must treat `.found` and `.updated` uniformly.
 9. **AWDL requires foreground + screen on.** Idle-looking links get torn down by
-   iOS 26 (the bug that killed MPC). Keepalives exist to assert interface use and
-   hold the QUIC idle timeout.
+   iOS 26 (the bug that killed MPC). Two keepalive layers assert interface use
+   and hold the 15 s idle timeout: QUIC-level PINGs every 5 s
+   (`quicEnableKeepalive`, no app traffic, also = fast dead-peer detection at
+   ~3 missed PINGs) and the engine's keepAlive signals — the engine layer
+   stays until PING-only AWDL assertion is validated on hardware.
 10. **`includePeerToPeer` breaks same-machine self-dials.** Use
     `PEERMESH_NO_P2P=1` for in-process tests; CI sets it for every
     same-machine job. Note `ProcessInfo.environment` caches at first access;
@@ -138,8 +141,13 @@ code that guards them without understanding why it exists.
 
 In-code TODOs reference these by name: `// TODO(ledger-name): one line`.
 
-- **datagrams** — real RFC 9221 QUIC datagrams (currently mapped onto a marked
-  reliable stream, floor-compatibility; see `QUICStreamHeaderCodec.datagramMarker`).
+- **datagrams** — real RFC 9221 QUIC datagrams for SUB-MTU payloads only
+  (~1.2 KB; DATAGRAM frames cannot fragment). Larger .datagram sends —
+  remote-shutter's ~4.5 KB preview stills — stay on the message channel as
+  `StreamKind.Datagram` units: sender-side credit windows give latest-wins
+  there, and MPC's 64 KB unreliable sends only worked via fragile IP
+  fragmentation QUIC deliberately dropped. Implementation must route by
+  size, never map .datagram → 9221 unconditionally.
 - **churn-benchmark** — S-6 formal stream-churn benchmark (nightly CI stub in `ci.yml`).
 - **pairing-code** — `.pairingCode` transcript binding (S-4, DD-2).
 - **compat-nsstream-bridge** — `MPCCompat.startStream` `NSStream` bridge over `PeerByteStream`.

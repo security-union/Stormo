@@ -153,6 +153,7 @@ final class QUICConnection: PeerConnection, @unchecked Sendable {
             connection.remotePeerBox.value = hello.peer
         }
 
+        quicEnableKeepalive(control, seconds: QUICTLS.keepaliveSeconds)
         connection.startControlReadLoop(control)
         connection.observeGroupTermination()
         return connection
@@ -234,6 +235,7 @@ final class QUICConnection: PeerConnection, @unchecked Sendable {
         remoteKeyHashBox.value = certKeyHash ?? hello.peer.keyHash
 
         try await controlWriter.send(control, tag: nil, frame: PeerHello.encode(localPeer))
+        quicEnableKeepalive(control, seconds: QUICTLS.keepaliveSeconds)
         startControlReadLoop(control)
     }
 
@@ -339,7 +341,7 @@ final class QUICConnection: PeerConnection, @unchecked Sendable {
         quicDebug("dedicated: header kind=\(header.kind) seq=\(String(describing: header.sequence))")
 
         switch header.kind {
-        case .message, .orderedMessage:
+        case .message, .orderedMessage, .datagram:
             Self.dedicatedOpened.withLock { $0 += 1 }
             defer {
                 // Receiver half of failure mode 13: the stream is spent once
@@ -368,13 +370,14 @@ final class QUICConnection: PeerConnection, @unchecked Sendable {
         }
     }
 
-    /// `.datagram` sends ride a `.message` stream carrying the datagram marker
-    /// (floor-compatibility, see ``QUICStreamHeaderCodec/datagramMarker``).
+    /// `.datagram` maps `StreamKind.Datagram` back to `.datagram` delivery
+    /// (floor-compatible channel mapping; TODO(datagrams) is the RFC 9221
+    /// refinement).
     private func deliveryFor(_ header: StreamHeaderInfo) -> Delivery {
         switch header.kind {
         case .orderedMessage: return .reliableOrdered
-        case .message:
-            return header.label == QUICStreamHeaderCodec.datagramMarker ? .datagram : .reliable
+        case .datagram: return .datagram
+        case .message: return .reliable
         default: return .reliable
         }
     }
@@ -416,7 +419,7 @@ final class QUICConnection: PeerConnection, @unchecked Sendable {
         case .reliableOrdered:
             header = StreamHeaderInfo(kind: .orderedMessage, sequence: sequence)
         case .datagram:
-            header = StreamHeaderInfo(kind: .message, label: QUICStreamHeaderCodec.datagramMarker)
+            header = StreamHeaderInfo(kind: .datagram)
         }
         if payload.count > Self.channelMaxPayload {
             try await sendDataOnDedicatedStream(payload, header: header)

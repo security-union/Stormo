@@ -144,6 +144,19 @@ func quicFinish(_ connection: NWConnection) async {
     }
 }
 
+/// Enable QUIC-level keepalive (PING frames) on the tunnel via an
+/// established stream's metadata. PINGs hold NAT/middlebox state, assert
+/// AWDL interface use (failure mode 9), and — paired with the tightened
+/// idle timeout — turn an unresponsive peer into a connection failure in
+/// seconds, all without app-level traffic.
+func quicEnableKeepalive(_ connection: NWConnection, seconds: Int) {
+    guard
+        let metadata = connection.metadata(definition: NWProtocolQUIC.definition)
+            as? NWProtocolQUIC.Metadata
+    else { return }
+    metadata.keepAlive = .seconds(seconds)
+}
+
 /// Deliberate local close of a spent stream. Detaches the state observer
 /// FIRST: inbound streams carry a failure observer that treats `.cancelled`
 /// as a transport failure and closes the whole connection — a bare `cancel`
@@ -399,30 +412,14 @@ func quicRequireCompatibleVersion(
 /// the generated type; parse with the verifier (hard caps, DD-5).
 enum QUICStreamHeaderCodec {
 
-    /// Driver-internal marker (in the otherwise-unused `label` of a `.message`
-    /// stream) meaning "this reliable stream stands in for a `.datagram`".
-    ///
-    /// RFC 9221 QUIC datagrams (`NWProtocolQUIC.Options.isDatagram`) are
-    /// macOS 13 / iOS 16 — **below the floor** (iOS 15 / macOS 12). To keep the
-    /// tier-2 loopback driver floor-compatible while preserving delivery
-    /// semantics end-to-end, `.datagram` sends ride a dedicated stream carrying
-    /// this marker; on loopback there is no loss, so behavior is indistinguishable
-    /// for correctness. True datagram flows are the on-radio refinement (S-1).
-    static let datagramMarker = "\u{01}pm-datagram"
-
     static func encode(_ info: StreamHeaderInfo) -> Data {
         var fbb = FlatBufferBuilder(initialSize: 128)
         let labelOffset = info.label.map { fbb.create(string: $0) } ?? Offset()
-        var transferOffset = Offset()
-        if let id = info.transferID {
-            let bytes = withUnsafeBytes(of: id.uuid) { Array($0) }
-            transferOffset = fbb.createVector(bytes)
-        }
         let root = PeerMesh_Wire_StreamHeader.createStreamHeader(
             &fbb,
             kind: wireKind(info.kind),
             sequence: info.sequence ?? 0,
-            transferIdVectorOffset: transferOffset,
+            transferId: info.transferID.map(WireTransferId.init),
             labelOffset: labelOffset)
         fbb.finish(offset: root)
         return Data(fbb.sizedByteArray)
@@ -440,12 +437,9 @@ enum QUICStreamHeaderCodec {
         }
         let kind = infoKind(root.kind)
         let sequence: UInt64? = (root.kind == .orderedmessage) ? root.sequence : nil
-        var transferID: UUID?
-        let tid = root.transferId
-        if tid.count == 16 {
-            transferID = tid.withUnsafeBytes { UUID(uuid: $0.load(as: uuid_t.self)) }
-        }
-        return StreamHeaderInfo(kind: kind, sequence: sequence, transferID: transferID, label: root.label)
+        return StreamHeaderInfo(
+            kind: kind, sequence: sequence,
+            transferID: root.transferId?.uuidValue, label: root.label)
     }
 
     private static func wireKind(_ kind: StreamHeaderInfo.Kind) -> PeerMesh_Wire_StreamKind {
@@ -454,6 +448,7 @@ enum QUICStreamHeaderCodec {
         case .orderedMessage: return .orderedmessage
         case .transferChunk: return .transferchunk
         case .appStream: return .appstream
+        case .datagram: return .datagram
         }
     }
 
@@ -463,6 +458,7 @@ enum QUICStreamHeaderCodec {
         case .orderedmessage: return .orderedMessage
         case .transferchunk: return .transferChunk
         case .appstream: return .appStream
+        case .datagram: return .datagram
         }
     }
 }

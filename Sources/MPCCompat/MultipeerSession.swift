@@ -167,7 +167,19 @@ public final class MultipeerSession: @unchecked Sendable {
     /// path, as they do in MCSession.
     public func send(_ data: Data, toPeers peerIDs: [PeerID], with mode: SendDataMode) throws {
         guard let core else { throw PeerMeshError.peerUnreachable(myPeerID) }
-        let delivery: Delivery = (mode == .reliable) ? .reliableOrdered : .datagram
+        // MPC's .unreliable allowed large payloads (raw UDP + IP
+        // fragmentation); PeerMesh datagrams are honest about the MTU and
+        // refuse them. Oversized unreliable sends degrade to .reliable —
+        // unordered, guaranteed: a superset of MPC's "may be dropped"
+        // promise, and the closest semantics that still deliver.
+        let delivery: Delivery
+        if mode == .reliable {
+            delivery = .reliableOrdered
+        } else if data.count > Delivery.maxDatagramPayload {
+            delivery = .reliable
+        } else {
+            delivery = .datagram
+        }
         core.send(data, to: peerIDs, delivery: delivery)
     }
 
