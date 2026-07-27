@@ -154,13 +154,13 @@ sequenceDiagram
     B->>A: Signal.Invite { peer_id, context, protocol_version } (FlatBuffers, verified read)
     A->>A: App callback: invitation + inviter identity hash (FR-22)
     alt pairing code verification
-        Note over B,A: Both derive 6-digit code from TLS exporter secret<br/>binding both certificates; users compare/enter code
+        Note over B,A: Both derive 6-digit code from TLS exporter secret<br/>binding both certificates — users compare/enter code
         B-->>A: Signal.CodeConfirm { transcript MAC }
         A-->>B: Signal.CodeConfirm { transcript MAC }
     end
     alt accepted
         A->>B: Signal.InviteResponse { accepted, roster }
-        Note over B,A: B admitted; roster gossip to all members (FR-13)
+        Note over B,A: B admitted — roster gossip to all members (FR-13)
     else declined / timeout (FR-9)
         A->>B: Signal.InviteResponse { declined }
         Note over B,A: Connection closed, half-open state cleaned up
@@ -295,7 +295,7 @@ flowchart TD
 
 ### 7.1 Key flows (sequence diagrams)
 
-The invitation/session-establishment flow is diagrammed under DD-2. The flows below cover the other major pieces: discovery, reliable message passing (stream-per-message, DD-7), and resource transfer. Each shows the sans-I/O split (DD-6): engines decide, drivers move bytes.
+The invitation/session-establishment flow is diagrammed under DD-2. The flows below cover the other major pieces: discovery, reliable message passing (stream-per-message, DD-7), resource transfer, and connection ownership (who hosts, who dials — FR-12). Each shows the sans-I/O split (DD-6): engines decide, drivers move bytes.
 
 **Discovery and advertising (FR-1..FR-5):**
 
@@ -336,12 +336,12 @@ sequenceDiagram
     EA-->>DA: Effect.sendData(payload, to: B, .reliable)
     Note over EA: Engine resolved recipients against the roster —<br/>pure decision, no I/O (DD-6)
     DA->>DB: NEW unidirectional QUIC stream:<br/>StreamHeader{kind: message} + payload + FIN
-    Note over DA,DB: One stream per message (DD-7): a lost packet of<br/>message 1 never delays message 2; cancel = RESET_STREAM
+    Note over DA,DB: One stream per message (DD-7): a lost packet of<br/>message 1 never delays message 2 — cancel = RESET_STREAM
     DB->>DB: read verified StreamHeader, read payload to FIN
     DB->>EB: Input.dataReceived(payload, from: A, .reliable)
     EB-->>AppB: emit .messageReceived (membership-gated)
 
-    alt .reliableOrdered (MPC parity; MPCCompat default)
+    alt .reliableOrdered (MPC parity — MPCCompat default)
         DA->>DB: StreamHeader{kind: orderedMessage, sequence: n} + payload + FIN
         DB->>DB: reorder buffer: release in sequence order
     else .datagram (FR-16)
@@ -366,8 +366,8 @@ sequenceDiagram
     DB->>EB: Input.signal(transferOffer, from: A)
     EB-->>AppB: emit .resourceOffered(name, Progress)
     DA->>DB: NEW unidirectional stream: StreamHeader{kind: transferChunk,<br/>transfer_id} + chunked file bytes … FIN
-    Note over DA,DB: Disk-to-disk streaming, bounded memory (QA-3);<br/>QUIC per-stream flow control IS the back-pressure;<br/>bulk bytes never touch the control or message streams (QA-4)
-    DB-->>AppB: Progress updates; temp file assembled
+    Note over DA,DB: Disk-to-disk streaming, bounded memory (QA-3) —<br/>QUIC per-stream flow control IS the back-pressure —<br/>bulk bytes never touch the control or message streams (QA-4)
+    DB-->>AppB: Progress updates — temp file assembled
     DB->>EB: transfer complete
     EB-->>AppB: emit .resourceReceived(name, localURL)
 
@@ -375,6 +375,84 @@ sequenceDiagram
         AppA->>DA: transfer.progress.cancel()
         DA->>DB: RESET_STREAM — receiver discards partial temp file
     end
+```
+
+**Connection ownership — who hosts, who dials (FR-12, DD-3):**
+
+Exactly one QUIC connection exists per peer pair. The **advertiser hosts**: its
+`NWListener` owns the QUIC endpoint and accepts inbound connection groups
+(retained via the pending-inbound table — spike finding 2). The **inviter
+dials**: `invite()` creates the `NWConnectionGroup` toward the discovered
+endpoint (on pre-26 OSes the `.service` endpoint is resolved to a concrete
+`hostPort` first — failure mode 12). Every subsequent exchange in *both*
+directions — control signals, keepalives, per-message streams, transfers —
+multiplexes over that single connection; streams are opened from either side,
+and there is never a dial back.
+
+```mermaid
+flowchart LR
+    B["Peer B — browser/inviter<br/>invite() dials:<br/>NWConnectionGroup(NWMultiplexGroup)"]
+    A["Peer A — advertiser<br/>NWListener hosts the QUIC endpoint,<br/>accepts + retains inbound groups"]
+    subgraph CONN["ONE shared QUIC connection per pair (FR-12)"]
+        direction TB
+        CS["control stream (tag 0x00):<br/>PeerHello · invitation · roster gossip · keepalives (DD-5)"]
+        DS["one short-lived stream PER message /<br/>transfer / app byte stream, either direction (DD-7)"]
+    end
+    B -- dial --> CONN
+    CONN -- accept --> A
+```
+
+A second invitation in the opposite direction, or any send, reuses the
+established connection (the engine emits `.sendSignal`, not `.connect`, when a
+connection to that peer already exists). The dial-direction **tie-break**
+(`ProtocolEngine.shouldDial`) exists for the one case with no natural dialer:
+mesh growth via roster gossip (FR-13), where two members learn of each other
+simultaneously and both would otherwise dial:
+
+```mermaid
+sequenceDiagram
+    participant C as Peer C (lower key hash)
+    participant D as Peer D (higher key hash)
+    Note over C,D: Same roster gossip names each to the other (FR-13) —<br/>no inviter, so no natural dial direction
+    C->>C: shouldDial(C → D)? lower hash — dial
+    D->>D: shouldDial(D → C)? higher hash — wait for C's dial
+    C->>D: single dial → one connection (FR-12 holds)
+```
+
+In the default `fullMesh(maxPeers: 32)` topology (DD-3) each pair holds one
+connection, so a device carries at most N−1 connections; `.hostRelay` reduces
+that to 1 for non-host members.
+
+**TLS roles and mutual authentication (FR-19..FR-22, DD-2):**
+
+The advertiser is the QUIC/TLS **server**, the inviter the **client** — but the
+roles matter only to the handshake choreography; the cryptography is symmetric.
+This is **mutual TLS**: both sides build their `NWParameters` identically
+(`QUICTLS.parameters`) — each presents its self-signed P-256 leaf certificate
+as the local identity, each sets `peer_authentication_required`, so the server
+demands a client certificate exactly as the client demands a server one. No
+CA, no chain: PKI is never consulted. Both sides install the *same* verify
+block, which extracts the peer's leaf DER and applies the session
+`TrustPolicy` via `TrustEvaluator` (`.automatic` TOFU record / `.pairingCode`
+/ `.pinned`). After the handshake, each side recovers the peer's
+TLS-authenticated key hash from the connection metadata and cross-checks it
+against the `PeerHello` identity — a mismatch is `identityMismatch` and the
+connection dies. The PeerID *is* the key hash (FR-20), so the transport
+identity and the session identity are the same fact, authenticated in both
+directions.
+
+```mermaid
+sequenceDiagram
+    participant B as Inviter — QUIC/TLS client
+    participant A as Advertiser — QUIC/TLS server (NWListener)
+    B->>A: QUIC ClientHello (ALPN peermesh/1)
+    A->>B: server cert: self-signed P-256 leaf + CertificateRequest (mTLS)
+    B->>A: client cert: self-signed P-256 leaf
+    Note over B,A: Each side runs the SAME verify block — PKI ignored,<br/>leaf DER → TrustEvaluator with the session TrustPolicy<br/>(.automatic TOFU / .pairingCode / .pinned)
+    Note over B,A: Handshake complete: encrypted +<br/>certificate-authenticated in BOTH directions (FR-19)
+    B->>A: control stream: PeerHello{keyHash, displayName}
+    A->>B: control stream: PeerHello{keyHash, displayName}
+    Note over B,A: Each side cross-checks PeerHello.keyHash against the<br/>TLS-authenticated certificate key hash (FR-22) —<br/>mismatch ⇒ identityMismatch, connection dropped
 ```
 
 API sketch (illustrative):
