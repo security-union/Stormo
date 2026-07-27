@@ -197,9 +197,13 @@ enum QUICTLS {
         quic.initialMaxStreamDataBidirectionalLocal = 1 << 20
         quic.initialMaxStreamDataBidirectionalRemote = 1 << 20
         quic.initialMaxStreamDataUnidirectional = 1 << 20
-        // Stream-per-message churn (DD-7/S-6): allow many concurrent streams.
-        quic.initialMaxStreamsBidirectional = 2_048
-        quic.initialMaxStreamsUnidirectional = 2_048
+        // Stream-per-message churn (DD-7/S-6): the initial allowance is the
+        // connection's LIFETIME stream budget — this QUIC stack never extends
+        // MAX_STREAMS as streams close (failure mode 13). 2^30 outlives any
+        // session (~500 years at remote-shutter's ~66 streams/s); the number
+        // is a transport parameter, not an allocation.
+        quic.initialMaxStreamsBidirectional = 1 << 30
+        quic.initialMaxStreamsUnidirectional = 1 << 30
 
         let sec = quic.securityProtocolOptions
         sec_protocol_options_set_local_identity(sec, localIdentity.secIdentity)

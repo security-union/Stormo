@@ -60,9 +60,14 @@ public struct PeerIdentity: Sendable {
         #if canImport(Security)
         let store = KeychainIdentityStore()
         do {
-            if let existing = try store.load(name: name) { return existing }
-            // Secure Enclave-backed where available (only the keychain path can
-            // create a non-exportable enclave key).
+            if let existing = try store.load(name: name) {
+                // Enclave-backed identities cannot form a TLS SecIdentity
+                // (TODO(se-identity)) — a stored one would fail every
+                // advertise/dial. Replace it with a software identity; peers
+                // see a one-time identity change (TOFU warning), not a
+                // broken session.
+                if case .software = existing.key { return existing }
+            }
             let created = store.makeIdentity(name: name)
             try store.save(created)
             return created

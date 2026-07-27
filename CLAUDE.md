@@ -116,6 +116,23 @@ code that guards them without understanding why it exists.
     `.service` dial is kept on 26+ where it is hardware-validated. The pre-26
     resolve path is exercised by CI but NOT yet validated on pre-26 hardware
     over AWDL (see mesh-hardware in the TODO ledger).
+13. **The initial stream allowance is the connection's LIFETIME budget —
+    this QUIC stack never extends MAX_STREAMS as streams close.** Per-
+    message streams hit the `initialMaxStreams*` wall no matter how cleanly
+    they close (~60 s at remote-shutter's rate with the old 2048): sends
+    stuck in `.preparing`, ready-timeouts, then idle-timeout collapse.
+    Resolution (DD-7 hardware amendment): messages ride a persistent
+    per-direction channel (tag `0x02`, framed StreamHeader+payload);
+    dedicated streams remain only for >1 MiB payloads, transfers, and app
+    streams, with limits at 2^30 (a transport parameter, not an
+    allocation). Dedicated streams are retired when spent, with two traps:
+    (a) the awaited `.finalMessage` write-close means processed-by-the-
+    stack, NOT delivered — a sender cancelling right after it aborts the
+    payload (verified on loopback); the sender retires when its receive
+    ends, which the receiver's retire triggers; (b) `quicRetire` detaches
+    the state observer BEFORE cancel — inbound streams carry a failure
+    observer that treats `.cancelled` as transport failure and closes the
+    whole connection. Guarded by the stream-churn soak test.
 
 ## TODO ledger (single authoritative list)
 
@@ -129,8 +146,8 @@ In-code TODOs reference these by name: `// TODO(ledger-name): one line`.
 - **ui-completion** — PeerMeshUI beyond the current skeleton.
 - **mesh-join** — join via endpoint exchange for gossiped roster members (roster names peers we haven't discovered).
 - **send-ack** — send-acknowledgement API (`PeerSession.send` returns before transport handoff).
-- **compat-identity-persistence** — MPCCompat per-name identity persistence (sessions currently use an ephemeral key per `CompatCore`).
 - **mesh-hardware** — S-2 mesh-ceiling and S-5 backgrounding hardware spikes.
+- **se-identity** — Secure Enclave-backed identities: `IdentityCertificate.makeSecIdentity` only forms a `SecIdentity` from software keys, so stores create software identities and `loadOrCreate` self-heals stored enclave identities (needs enclave signing in the cert/TLS path).
 - **liveness** — FR-14 liveness detection beyond the transport idle timeout.
 
 ## More docs
