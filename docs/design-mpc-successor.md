@@ -63,7 +63,7 @@ Priority: **M** = must (1.0), **S** = should (1.x), **C** = could (post-1.0).
 
 ### 3.4 Data Exchange
 
-- **FR-15 (M)** **Reliable messaging:** back-pressured message send to one, a subset, or all session peers (messages up to 16 MB; larger payloads directed to FR-17), **each message on its own unidirectional QUIC stream** (MoQ pattern, DD-7). Two reliable modes: `.reliable` (default; delivery guaranteed, ordering across messages not guaranteed — messages never head-of-line-block each other) and `.reliableOrdered` (FIFO per sender–receiver pair via sequence numbers; MPC behavioral parity, used by `MPCCompat`).
+- **FR-15 (M)** **Reliable messaging:** back-pressured message send to one, a subset, or all session peers (messages up to 16 MB; larger payloads directed to FR-17), carried as framed `StreamHeader` + payload units on the persistent per-direction **message channel** (DD-7 hardware amendment; payloads > 1 MiB ride a dedicated stream per message). Two reliable modes: `.reliable` (default; delivery guaranteed, ordering across messages not guaranteed) and `.reliableOrdered` (FIFO per sender–receiver pair via sequence numbers; MPC behavioral parity, used by `MPCCompat`).
 - **FR-16 (M)** **Unreliable messaging:** low-latency datagram send (QUIC datagrams, RFC 9221) with sender-visible max payload size; silently droppable, unordered.
 - **FR-17 (M)** **Resource transfer:** file/URL transfer to a peer with `Progress` reporting, cancellation, and bounded memory (streaming from/to disk, never whole-file in memory), on a dedicated QUIC stream per transfer so bulk transfers never head-of-line-block messaging.
 - **FR-18 (M)** **Byte streams:** application-opened named bidirectional streams exposed as `AsyncSequence<Data>` + async writer with explicit back-pressure; each maps to its own QUIC stream. (`NSStream` bridging only via `MPCCompat`, FR-24.)
@@ -124,8 +124,8 @@ One QUIC connection per peer pair carries everything:
 | Session concern | QUIC mechanism |
 |---|---|
 | Control plane (invitation, roster gossip, keepalive, topology election) | Bidirectional **control stream 0** (persistent — signaling requires total order), size-prefixed **FlatBuffers** signal messages (DD-5) |
-| Reliable messages (FR-15) | **One unidirectional stream per message** (MoQ pattern, DD-7): `StreamHeader` + payload + FIN |
-| Unreliable messages (FR-16) | **QUIC datagrams** (RFC 9221) |
+| Reliable messages (FR-15) | Framed `StreamHeader` + payload units on the persistent per-direction **message channel** (DD-7 hardware amendment); payloads > 1 MiB ride a dedicated stream |
+| Unreliable messages (FR-16) | **QUIC datagrams** (RFC 9221; below the iOS 16/macOS 13 availability they ride the message channel with a datagram marker) |
 | Resource transfers (FR-17) | One unidirectional stream per transfer (`StreamHeader.kind = transferChunk`) — native per-stream flow control, no head-of-line blocking of messages |
 | App byte streams (FR-18) | One bidirectional stream each (`StreamHeader.kind = appStream`) |
 | Encryption (FR-19) | TLS 1.3, mandatory, connection-level |
@@ -321,7 +321,7 @@ sequenceDiagram
     TA->>NET: cancel listener — immediate radio release (FR-5, C-1)
 ```
 
-**Reliable message passing — one stream per message (FR-15, DD-6, DD-7):**
+**Reliable message passing — the per-direction message channel (FR-15, DD-6, DD-7 amendment):**
 
 ```mermaid
 sequenceDiagram
@@ -335,17 +335,19 @@ sequenceDiagram
     AppA->>EA: command .send(payload, to: .all, .reliable)
     EA-->>DA: Effect.sendData(payload, to: B, .reliable)
     Note over EA: Engine resolved recipients against the roster —<br/>pure decision, no I/O (DD-6)
-    DA->>DB: NEW unidirectional QUIC stream:<br/>StreamHeader{kind: message} + payload + FIN
-    Note over DA,DB: One stream per message (DD-7): a lost packet of<br/>message 1 never delays message 2 — cancel = RESET_STREAM
-    DB->>DB: read verified StreamHeader, read payload to FIN
+    DA->>DB: message channel (tag 0x02, one long-lived stream per direction):<br/>[len][StreamHeader{kind: message}][len][payload]
+    Note over DA,DB: Per-message streams exhaust the connection's LIFETIME<br/>stream budget on this stack (failure mode 13) —<br/>the channel is opened once and writes serialize per sender
+    DB->>DB: read framed unit (verified StreamHeader)
     DB->>EB: Input.dataReceived(payload, from: A, .reliable)
     EB-->>AppB: emit .messageReceived (membership-gated)
 
     alt .reliableOrdered (MPC parity — MPCCompat default)
-        DA->>DB: StreamHeader{kind: orderedMessage, sequence: n} + payload + FIN
-        DB->>DB: reorder buffer: release in sequence order
+        DA->>DB: channel unit with kind: orderedMessage + sequence n
+        DB->>DB: reorder buffer — release in sequence order
     else .datagram (FR-16)
-        DA->>DB: QUIC DATAGRAM frame (RFC 9221) — no stream, droppable
+        DA->>DB: channel unit carrying the datagram marker<br/>(true RFC 9221 datagrams are the iOS 16+ refinement)
+    else payload over 1 MiB
+        DA->>DB: DEDICATED stream (tag 0x01):<br/>StreamHeader + payload + FIN — retired when spent
     end
 ```
 
@@ -396,7 +398,8 @@ flowchart LR
     subgraph CONN["ONE shared QUIC connection per pair (FR-12)"]
         direction TB
         CS["control stream (tag 0x00):<br/>PeerHello · invitation · roster gossip · keepalives (DD-5)"]
-        DS["one short-lived stream PER message /<br/>transfer / app byte stream, either direction (DD-7)"]
+        MC["message channel (tag 0x02), one per direction:<br/>framed StreamHeader + payload units —<br/>all messages ≤ 1 MiB (DD-7 amendment)"]
+        DS["dedicated streams (tag 0x01): messages over 1 MiB,<br/>resource transfers, app byte streams — retired when spent"]
     end
     B -- dial --> CONN
     CONN -- accept --> A
