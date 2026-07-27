@@ -9,14 +9,19 @@ import Network
 
 /// A single secured peer-pair connection over one QUIC connection (DD-1),
 /// multiplexed with `NWConnectionGroup` + `NWMultiplexGroup` (Spike S-3
-/// resolution — see `docs/spike-results.md`):
+/// resolution — see `docs/spike-results.md`). Three stream classes, each
+/// self-identified by its first byte (`QUICFraming.StreamTag`):
 ///
-/// - **control stream** — the first bidirectional stream (dialer-opened, tagged
-///   `0x00`): a `PeerHello` frame in each direction, then length-prefixed
-///   `SignalCodec` bytes (DD-5).
-/// - **dedicated streams** — every reliable message, resource transfer, and app
-///   byte stream rides its own stream (tagged `0x01`): a length-prefixed
-///   `StreamHeader` (DD-7) then payload to FIN.
+/// - **control stream** (`0x00`) — the first bidirectional stream
+///   (dialer-opened): a `PeerHello` frame each way, then length-prefixed
+///   `SignalCodec` signals (DD-5) — invitations, roster, keepalives.
+/// - **message channel** (`0x02`) — ONE long-lived stream per direction,
+///   lazily opened by each sender: every message ≤ 1 MiB of every delivery
+///   mode as repeating [len][StreamHeader][len][payload] units (DD-7
+///   hardware amendment, failure mode 13).
+/// - **dedicated streams** (`0x01`) — messages > 1 MiB, resource transfers,
+///   and app byte streams: a length-prefixed `StreamHeader` then payload to
+///   FIN; retired when spent.
 ///
 /// `NWConnection(from:)` opens outbound streams (`extract()` is only the
 /// macOS 12 fallback — see ``openGroupStream()``); `newConnectionHandler`
