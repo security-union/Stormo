@@ -33,32 +33,42 @@ struct PeerHelloCodecTests {
         #expect(PeerHello.decode(PeerHello.encode(bad)) == nil)
     }
 
+    // Gate tests pin BOTH sides explicitly — they must not couple to
+    // ProtocolVersion.current, or bumping it breaks them spuriously.
+
     @Test("Version gate: same major passes, different major throws the typed error")
     func versionGate() throws {
-        try quicRequireCompatibleVersion(ProtocolVersion(major: 1, minor: 9, patch: 9))
+        let local = ProtocolVersion(major: 3, minor: 0, patch: 0)
+        try quicRequireCompatibleVersion(
+            ProtocolVersion(major: 3, minor: 9, patch: 9), local: local)
 
-        let future = ProtocolVersion(major: 2, minor: 0, patch: 0)
-        #expect(throws: QUICError.self) { try quicRequireCompatibleVersion(future) }
+        let newer = ProtocolVersion(major: 4, minor: 0, patch: 0)
         do {
-            try quicRequireCompatibleVersion(future)
+            try quicRequireCompatibleVersion(newer, local: local)
+            Issue.record("expected protocolVersionMismatch")
         } catch let error as QUICError {
             // The diagnostic must name both versions and tell THIS side to upgrade.
             let text = error.localizedDescription
-            #expect(text.contains("2.0.0"))
+            #expect(text.contains("local 3.0.0"))
+            #expect(text.contains("4.0.0"))
             #expect(text.contains("this device needs an app upgrade"))
+        } catch {
+            Issue.record("unexpected error type: \(error)")
         }
     }
 
     @Test("Version gate: older-major peer throws with the peer-must-upgrade diagnostic")
     func versionGateOlderPeer() {
         do {
-            try quicRequireCompatibleVersion(ProtocolVersion(major: 0, minor: 9, patch: 0))
+            try quicRequireCompatibleVersion(
+                ProtocolVersion(major: 2, minor: 9, patch: 0),
+                local: ProtocolVersion(major: 3, minor: 0, patch: 0))
             Issue.record("expected protocolVersionMismatch")
         } catch let error as QUICError {
             // Remote major is LOWER — the other side is the one that upgrades.
             let text = error.localizedDescription
-            #expect(text.contains("0.9.0"))
-            #expect(text.contains("local 1.0.0"))
+            #expect(text.contains("2.9.0"))
+            #expect(text.contains("local 3.0.0"))
             #expect(text.contains("the peer needs an app upgrade"))
         } catch {
             Issue.record("unexpected error type: \(error)")
@@ -67,11 +77,12 @@ struct PeerHelloCodecTests {
 
     @Test("A newer-minor hello from a future peer still decodes and passes the gate")
     func newerMinorInterop() throws {
+        let local = ProtocolVersion(major: 1, minor: 0, patch: 0)
+        let future = ProtocolVersion(major: 1, minor: 7, patch: 2)
         let id = PeerID(keyHash: multihash, displayName: "Future")
-        let hello = PeerHello.encode(id, version: ProtocolVersion(major: 1, minor: 7, patch: 2))
-        let decoded = try #require(PeerHello.decode(hello))
-        #expect(decoded.version == ProtocolVersion(major: 1, minor: 7, patch: 2))
-        try quicRequireCompatibleVersion(decoded.version)
+        let decoded = try #require(PeerHello.decode(PeerHello.encode(id, version: future)))
+        #expect(decoded.version == future)
+        try quicRequireCompatibleVersion(decoded.version, local: local)
     }
 }
 

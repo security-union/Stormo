@@ -364,9 +364,13 @@ enum PeerHello {
 /// Same-major interop gate, applied by both sides right after hello decode.
 /// The error names both versions so the app can render "upgrade this device"
 /// (remote is newer) vs "peer must upgrade" (remote is older).
-func quicRequireCompatibleVersion(_ remote: ProtocolVersion) throws {
-    guard ProtocolVersion.current.isCompatible(with: remote) else {
-        throw QUICError.protocolVersionMismatch(local: .current, remote: remote)
+/// `local` is injectable so tests pin both sides explicitly instead of
+/// coupling to whatever `.current` is this year.
+func quicRequireCompatibleVersion(
+    _ remote: ProtocolVersion, local: ProtocolVersion = .current
+) throws {
+    guard local.isCompatible(with: remote) else {
+        throw QUICError.protocolVersionMismatch(local: local, remote: remote)
     }
 }
 

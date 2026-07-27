@@ -55,7 +55,6 @@ struct PeerMeshTests {
     @Test("Signal codec constants match DD-5 discipline")
     func signalCodecDiscipline() {
         #expect(SignalCodec.maxControlMessageSize == 64 * 1024)
-        #expect(ProtocolVersion.current == ProtocolVersion(major: 1, minor: 0, patch: 0))
     }
 }
 
