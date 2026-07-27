@@ -63,9 +63,9 @@ Priority: **M** = must (1.0), **S** = should (1.x), **C** = could (post-1.0).
 
 ### 3.4 Data Exchange
 
-- **FR-15 (M)** **Reliable messaging:** back-pressured message send to one, a subset, or all session peers (messages up to 16 MB; larger payloads directed to FR-17), **each message on its own unidirectional QUIC stream** (MoQ pattern, DD-7). Two reliable modes: `.reliable` (default; delivery guaranteed, ordering across messages not guaranteed — messages never head-of-line-block each other) and `.reliableOrdered` (FIFO per sender–receiver pair via sequence numbers; MPC behavioral parity, used by `MPCCompat`).
+- **FR-15 (M)** **Reliable messaging:** back-pressured message send to one, a subset, or all session peers (messages up to 16 MB; larger payloads directed to FR-17), carried as framed `StreamHeader` + payload units on the persistent per-direction **message channel** (DD-7 hardware amendment; payloads > 1 MiB ride a dedicated stream per message). Two reliable modes: `.reliable` (default; delivery guaranteed, ordering across messages not guaranteed) and `.reliableOrdered` (FIFO per sender–receiver pair via sequence numbers; MPC behavioral parity, used by `MPCCompat`).
 - **FR-16 (M)** **Unreliable messaging:** low-latency datagram send (QUIC datagrams, RFC 9221) with sender-visible max payload size; silently droppable, unordered.
-- **FR-17 (M)** **Resource transfer:** file/URL transfer to a peer with `Progress` reporting, cancellation, and bounded memory (streaming from/to disk, never whole-file in memory), on a dedicated QUIC stream per transfer so bulk transfers never head-of-line-block messaging.
+- **FR-17 (M)** **Resource transfer:** file/URL transfer to a peer with **live byte-counting `Progress` on BOTH ends** — the sender's returned `Progress` advances as chunks are written (back-pressured), the receiver's as bytes land; `MPCCompat.sendResource` returns the sender's `Progress` with `MCSession` unit semantics (total = file bytes), so existing progress-bar code works unchanged. Cancellation from either `Progress`; bounded memory (streaming from/to disk, never whole-file in memory); a dedicated QUIC stream per transfer so bulk transfers never head-of-line-block messaging.
 - **FR-18 (M)** **Byte streams:** application-opened named bidirectional streams exposed as `AsyncSequence<Data>` + async writer with explicit back-pressure; each maps to its own QUIC stream. (`NSStream` bridging only via `MPCCompat`, FR-24.)
 
 ### 3.5 Security
@@ -124,8 +124,8 @@ One QUIC connection per peer pair carries everything:
 | Session concern | QUIC mechanism |
 |---|---|
 | Control plane (invitation, roster gossip, keepalive, topology election) | Bidirectional **control stream 0** (persistent — signaling requires total order), size-prefixed **FlatBuffers** signal messages (DD-5) |
-| Reliable messages (FR-15) | **One unidirectional stream per message** (MoQ pattern, DD-7): `StreamHeader` + payload + FIN |
-| Unreliable messages (FR-16) | **QUIC datagrams** (RFC 9221) |
+| Reliable messages (FR-15) | Framed `StreamHeader` + payload units on the persistent per-direction **message channel** (DD-7 hardware amendment); payloads > 1 MiB ride a dedicated stream |
+| Unreliable messages (FR-16) | **QUIC datagrams** (RFC 9221; below the iOS 16/macOS 13 availability they ride the message channel with a datagram marker) |
 | Resource transfers (FR-17) | One unidirectional stream per transfer (`StreamHeader.kind = transferChunk`) — native per-stream flow control, no head-of-line blocking of messages |
 | App byte streams (FR-18) | One bidirectional stream each (`StreamHeader.kind = appStream`) |
 | Encryption (FR-19) | TLS 1.3, mandatory, connection-level |
@@ -154,13 +154,13 @@ sequenceDiagram
     B->>A: Signal.Invite { peer_id, context, protocol_version } (FlatBuffers, verified read)
     A->>A: App callback: invitation + inviter identity hash (FR-22)
     alt pairing code verification
-        Note over B,A: Both derive 6-digit code from TLS exporter secret<br/>binding both certificates; users compare/enter code
+        Note over B,A: Both derive 6-digit code from TLS exporter secret<br/>binding both certificates — users compare/enter code
         B-->>A: Signal.CodeConfirm { transcript MAC }
         A-->>B: Signal.CodeConfirm { transcript MAC }
     end
     alt accepted
         A->>B: Signal.InviteResponse { accepted, roster }
-        Note over B,A: B admitted; roster gossip to all members (FR-13)
+        Note over B,A: B admitted — roster gossip to all members (FR-13)
     else declined / timeout (FR-9)
         A->>B: Signal.InviteResponse { declined }
         Note over B,A: Connection closed, half-open state cleaned up
@@ -312,7 +312,7 @@ flowchart TD
 
 ### 7.1 Key flows (sequence diagrams)
 
-The invitation/session-establishment flow is diagrammed under DD-2. The flows below cover the other major pieces: discovery, reliable message passing (stream-per-message, DD-7), and resource transfer. Each shows the sans-I/O split (DD-6): engines decide, drivers move bytes.
+The invitation/session-establishment flow is diagrammed under DD-2. The flows below cover the other major pieces: discovery, reliable message passing (stream-per-message, DD-7), resource transfer, and connection ownership (who hosts, who dials — FR-12). Each shows the sans-I/O split (DD-6): engines decide, drivers move bytes.
 
 **Discovery and advertising (FR-1..FR-5):**
 
@@ -338,7 +338,7 @@ sequenceDiagram
     TA->>NET: cancel listener — immediate radio release (FR-5, C-1)
 ```
 
-**Reliable message passing — one stream per message (FR-15, DD-6, DD-7):**
+**Reliable message passing — the per-direction message channel (FR-15, DD-6, DD-7 amendment):**
 
 ```mermaid
 sequenceDiagram
@@ -352,17 +352,19 @@ sequenceDiagram
     AppA->>EA: command .send(payload, to: .all, .reliable)
     EA-->>DA: Effect.sendData(payload, to: B, .reliable)
     Note over EA: Engine resolved recipients against the roster —<br/>pure decision, no I/O (DD-6)
-    DA->>DB: NEW unidirectional QUIC stream:<br/>StreamHeader{kind: message} + payload + FIN
-    Note over DA,DB: One stream per message (DD-7): a lost packet of<br/>message 1 never delays message 2; cancel = RESET_STREAM
-    DB->>DB: read verified StreamHeader, read payload to FIN
+    DA->>DB: message channel (tag 0x02, one long-lived stream per direction):<br/>[len][StreamHeader{kind: message}][len][payload]
+    Note over DA,DB: Per-message streams exhaust the connection's LIFETIME<br/>stream budget on this stack (failure mode 13) —<br/>the channel is opened once and writes serialize per sender
+    DB->>DB: read framed unit (verified StreamHeader)
     DB->>EB: Input.dataReceived(payload, from: A, .reliable)
     EB-->>AppB: emit .messageReceived (membership-gated)
 
-    alt .reliableOrdered (MPC parity; MPCCompat default)
-        DA->>DB: StreamHeader{kind: orderedMessage, sequence: n} + payload + FIN
-        DB->>DB: reorder buffer: release in sequence order
+    alt .reliableOrdered (MPC parity — MPCCompat default)
+        DA->>DB: channel unit with kind: orderedMessage + sequence n
+        DB->>DB: reorder buffer — release in sequence order
     else .datagram (FR-16)
-        DA->>DB: QUIC DATAGRAM frame (RFC 9221) — no stream, droppable
+        DA->>DB: channel unit with kind: datagram<br/>(true RFC 9221 datagrams are the iOS 16+ refinement)
+    else payload over 1 MiB
+        DA->>DB: DEDICATED stream (tag 0x01):<br/>StreamHeader + payload + FIN — retired when spent
     end
 ```
 
@@ -383,8 +385,8 @@ sequenceDiagram
     DB->>EB: Input.signal(transferOffer, from: A)
     EB-->>AppB: emit .resourceOffered(name, Progress)
     DA->>DB: NEW unidirectional stream: StreamHeader{kind: transferChunk,<br/>transfer_id} + chunked file bytes … FIN
-    Note over DA,DB: Disk-to-disk streaming, bounded memory (QA-3);<br/>QUIC per-stream flow control IS the back-pressure;<br/>bulk bytes never touch the control or message streams (QA-4)
-    DB-->>AppB: Progress updates; temp file assembled
+    Note over DA,DB: Disk-to-disk streaming, bounded memory (QA-3) —<br/>QUIC per-stream flow control IS the back-pressure —<br/>bulk bytes never touch the control or message streams (QA-4)
+    DB-->>AppB: Progress updates — temp file assembled
     DB->>EB: transfer complete
     EB-->>AppB: emit .resourceReceived(name, localURL)
 
@@ -392,6 +394,105 @@ sequenceDiagram
         AppA->>DA: transfer.progress.cancel()
         DA->>DB: RESET_STREAM — receiver discards partial temp file
     end
+```
+
+**Connection ownership — who hosts, who dials (FR-12, DD-3):**
+
+Exactly one QUIC connection exists per peer pair. The **advertiser hosts**: its
+`NWListener` owns the QUIC endpoint and accepts inbound connection groups
+(retained via the pending-inbound table — spike finding 2). The **inviter
+dials**: `invite()` creates the `NWConnectionGroup` toward the discovered
+endpoint (on pre-26 OSes the `.service` endpoint is resolved to a concrete
+`hostPort` first — failure mode 12). Every subsequent exchange in *both*
+directions — control signals, keepalives, per-message streams, transfers —
+multiplexes over that single connection; streams are opened from either side,
+and there is never a dial back.
+
+```mermaid
+flowchart LR
+    B["Peer B — browser/inviter<br/>invite() dials:<br/>NWConnectionGroup(NWMultiplexGroup)"]
+    A["Peer A — advertiser<br/>NWListener hosts the QUIC endpoint,<br/>accepts + retains inbound groups"]
+    subgraph CONN["ONE shared QUIC connection per pair (FR-12)"]
+        direction TB
+        CS["control stream (tag 0x00):<br/>PeerHello · invitation · roster gossip · keepalives (DD-5)"]
+        MC["message channel (tag 0x02), one per direction:<br/>framed StreamHeader + payload units —<br/>all messages ≤ 1 MiB (DD-7 amendment)"]
+        DS["dedicated streams (tag 0x01): messages over 1 MiB,<br/>resource transfers, app byte streams — retired when spent"]
+    end
+    B -- dial --> CONN
+    CONN -- accept --> A
+```
+
+A second invitation in the opposite direction, or any send, reuses the
+established connection (the engine emits `.sendSignal`, not `.connect`, when a
+connection to that peer already exists). The dial-direction **tie-break**
+(`ProtocolEngine.shouldDial`) exists for the one case with no natural dialer:
+mesh growth via roster gossip (FR-13), where two members learn of each other
+simultaneously and both would otherwise dial:
+
+```mermaid
+sequenceDiagram
+    participant C as Peer C (lower key hash)
+    participant D as Peer D (higher key hash)
+    Note over C,D: Same roster gossip names each to the other (FR-13) —<br/>no inviter, so no natural dial direction
+    C->>C: shouldDial(C → D)? lower hash — dial
+    D->>D: shouldDial(D → C)? higher hash — wait for C's dial
+    C->>D: single dial → one connection (FR-12 holds)
+```
+
+In the default `fullMesh(maxPeers: 32)` topology (DD-3) each pair holds one
+connection, so a device carries at most N−1 connections; `.hostRelay` reduces
+that to 1 for non-host members.
+
+**Which traffic rides which stream:**
+
+Every peer pair shares one QUIC connection carrying three stream classes,
+each self-identified by its first byte (the stream tag):
+
+| Traffic | Stream | Tag |
+|---|---|---|
+| **App messages** — video frames, game state, anything via `send(_:delivery:)`, up to 1 MiB, all delivery modes | the sender's **message channel**: one long-lived stream per direction, framed `StreamHeader` + payload units | `0x02` |
+| **App messages over 1 MiB** (FR-15 allows 16 MB) | a **dedicated stream** per message, retired when spent | `0x01` |
+| **PeerMesh's own protocol** — `PeerHello`, invitations, accept/decline, roster gossip, keepalives, transfer offers, stream-open announcements | the **control stream**: one bidirectional stream, dialer-opened first, total order (DD-5) | `0x00` |
+| **File transfers** (`sendResource`, FR-17) | offer/accept signals on the control stream; the bytes on a **dedicated stream** per transfer (disk-to-disk, own flow control) | `0x00` + `0x01` |
+| **App byte streams** (`openStream`, FR-18) | a **dedicated stream** each, duplex, app-controlled lifetime | `0x01` |
+
+Concretely, in remote-shutter: the 33 fps camera preview (~4.5 KB frames)
+rides the camera→monitor message channel; shutter commands and zoom ride the
+monitor→camera message channel; the invitation that started the session and
+the 5 s keepalives ride the control stream; and a captured full-resolution
+video handed off via `sendResource` streams on its own dedicated stream so it
+never delays a single preview frame (QA-4).
+
+**TLS roles and mutual authentication (FR-19..FR-22, DD-2):**
+
+The advertiser is the QUIC/TLS **server**, the inviter the **client** — but the
+roles matter only to the handshake choreography; the cryptography is symmetric.
+This is **mutual TLS**: both sides build their `NWParameters` identically
+(`QUICTLS.parameters`) — each presents its self-signed P-256 leaf certificate
+as the local identity, each sets `peer_authentication_required`, so the server
+demands a client certificate exactly as the client demands a server one. No
+CA, no chain: PKI is never consulted. Both sides install the *same* verify
+block, which extracts the peer's leaf DER and applies the session
+`TrustPolicy` via `TrustEvaluator` (`.automatic` TOFU record / `.pairingCode`
+/ `.pinned`). After the handshake, each side recovers the peer's
+TLS-authenticated key hash from the connection metadata and cross-checks it
+against the `PeerHello` identity — a mismatch is `identityMismatch` and the
+connection dies. The PeerID *is* the key hash (FR-20), so the transport
+identity and the session identity are the same fact, authenticated in both
+directions.
+
+```mermaid
+sequenceDiagram
+    participant B as Inviter — QUIC/TLS client
+    participant A as Advertiser — QUIC/TLS server (NWListener)
+    B->>A: QUIC ClientHello (ALPN peermesh/1)
+    A->>B: server cert: self-signed P-256 leaf + CertificateRequest (mTLS)
+    B->>A: client cert: self-signed P-256 leaf
+    Note over B,A: Each side runs the SAME verify block — PKI ignored,<br/>leaf DER → TrustEvaluator with the session TrustPolicy<br/>(.automatic TOFU / .pairingCode / .pinned)
+    Note over B,A: Handshake complete: encrypted +<br/>certificate-authenticated in BOTH directions (FR-19)
+    B->>A: control stream: PeerHello{keyHash, displayName}
+    A->>B: control stream: PeerHello{keyHash, displayName}
+    Note over B,A: Each side cross-checks PeerHello.keyHash against the<br/>TLS-authenticated certificate key hash (FR-22) —<br/>mismatch ⇒ identityMismatch, connection dropped
 ```
 
 API sketch (illustrative):
