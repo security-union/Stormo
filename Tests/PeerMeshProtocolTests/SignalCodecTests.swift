@@ -21,7 +21,6 @@ struct SignalCodecTests {
         let decoded = try SignalCodec.decode(wire)
 
         #expect(decoded == original)  // byte-identical
-        #expect(decoded.root.protocolVersion == SignalCodec.protocolVersion)
         guard case .invite(let view) = decoded.body else {
             Issue.record("expected invite body")
             return

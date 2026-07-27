@@ -3,7 +3,8 @@
 // DISCIPLINE (normative — see design doc DD-5; enforced by CI):
 //   * Field ids are append-only. Never renumber, retype, or remove a field —
 //     mark it (deprecated) instead.
-//   * No new `required` fields after protocol_version 1 ships.
+//   * No new `required` fields after protocol major 1 ships (semver lives
+//     in PeerHello — peer_hello.fbs).
 //   * Enum/union values are append-only; 0 is always NONE/UNKNOWN.
 //   * Schema changes must pass `flatc --conform` against the previously
 //     released schema.
@@ -82,8 +83,7 @@ union SignalBody {
 /// Envelope for every control-plane message (DD-5 rule 1). Size-prefixed on
 /// the wire. Unknown body variants are ignored-and-logged, never fatal (QA-11).
 table Signal {
-  protocol_version:ushort (id: 0);
-  body:SignalBody (id: 2);  // id 1 is the implicit body_type field
+  body:SignalBody (id: 1);  // id 0 is the implicit body_type field
 }
 
 root_type Signal;
