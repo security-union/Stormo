@@ -345,7 +345,7 @@ sequenceDiagram
         DA->>DB: channel unit with kind: orderedMessage + sequence n
         DB->>DB: reorder buffer — release in sequence order
     else .datagram (FR-16)
-        DA->>DB: channel unit carrying the datagram marker<br/>(true RFC 9221 datagrams are the iOS 16+ refinement)
+        DA->>DB: channel unit with kind: datagram<br/>(true RFC 9221 datagrams are the iOS 16+ refinement)
     else payload over 1 MiB
         DA->>DB: DEDICATED stream (tag 0x01):<br/>StreamHeader + payload + FIN — retired when spent
     end
