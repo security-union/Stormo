@@ -111,12 +111,17 @@ public struct KeychainIdentityStore: IdentityStore {
 
     public init() {}
 
-    /// Creates a fresh identity, Secure Enclave-backed where available.
+    /// Creates a fresh software-P-256 identity.
+    ///
+    /// NOT Secure Enclave-backed: the TLS identity path
+    /// (`IdentityCertificate.makeSecIdentity`) can only form a `SecIdentity`
+    /// from an exportable software key — an enclave-backed identity fails
+    /// every advertise/dial with `unsupportedKeyType`. The key material still
+    /// rests in the data-protection keychain. TODO(se-identity): enclave
+    /// signing support in the certificate/TLS path, then prefer the enclave
+    /// here.
     public func makeIdentity(name: String) -> PeerIdentity {
-        if SecureEnclave.isAvailable, let seKey = try? SecureEnclave.P256.Signing.PrivateKey() {
-            return PeerIdentity(name: name, key: .secureEnclave(seKey))
-        }
-        return PeerIdentity(name: name)
+        PeerIdentity(name: name)
     }
 
     private func tagData(for name: String) -> Data {

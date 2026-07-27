@@ -145,6 +145,7 @@ In-code TODOs reference these by name: `// TODO(ledger-name): one line`.
 - **mesh-join** — join via endpoint exchange for gossiped roster members (roster names peers we haven't discovered).
 - **send-ack** — send-acknowledgement API (`PeerSession.send` returns before transport handoff).
 - **mesh-hardware** — S-2 mesh-ceiling and S-5 backgrounding hardware spikes.
+- **se-identity** — Secure Enclave-backed identities: `IdentityCertificate.makeSecIdentity` only forms a `SecIdentity` from software keys, so stores create software identities and `loadOrCreate` self-heals stored enclave identities (needs enclave signing in the cert/TLS path).
 - **liveness** — FR-14 liveness detection beyond the transport idle timeout.
 
 ## More docs
