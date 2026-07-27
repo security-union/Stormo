@@ -48,6 +48,7 @@ final class QUICConnection: PeerConnection, @unchecked Sendable {
 
     private let control: Locked<NWConnection?> = Locked(nil)
     private let controlWriter = ControlWriter()
+    private let messagesWriter = MessagesWriter()
     private let remotePeerBox: Locked<PeerID>
     private let remoteKeyHashBox: Locked<Data>
     private let closed = Locked(false)
@@ -299,11 +300,28 @@ final class QUICConnection: PeerConnection, @unchecked Sendable {
                 controlHandler?(stream)
             case .dedicated:
                 try await handleDedicatedStream(stream)
+            case .messages:
+                try await messageChannelReadLoop(stream)
             default:
                 stream.cancel()  // unexpected (e.g. control on the dialer side)
             }
         } catch {
             stream.cancel()
+        }
+    }
+
+    /// The peer's message channel: framed [header][payload] units for the
+    /// connection's lifetime. The loop ends on FIN/error; the channel is as
+    /// load-bearing as the control stream, so classify's failure path closing
+    /// the connection is correct here.
+    private func messageChannelReadLoop(_ stream: NWConnection) async throws {
+        quicDebug("messages channel: inbound")
+        while true {
+            let headerFrame = try await quicReceiveFrame(stream)
+            let header = try QUICStreamHeaderCodec.decode(headerFrame)
+            let payload = try await quicReceiveFrame(stream, allowEmpty: true)
+            let sequence = (header.kind == .orderedMessage) ? header.sequence : nil
+            eventsContinuation.yield(.data(payload, deliveryFor(header), sequence: sequence))
         }
     }
 
@@ -379,6 +397,11 @@ final class QUICConnection: PeerConnection, @unchecked Sendable {
         try await controlWriter.send(control, tag: nil, frame: bytes)
     }
 
+    /// Payloads above this ride a dedicated stream instead of the message
+    /// channel: bulk must never head-of-line block messaging (QA-4), and the
+    /// channel's framed reads are capped at `QUICFraming.maxFrame`.
+    static let channelMaxPayload = QUICFraming.maxFrame
+
     func sendData(_ payload: Data, delivery: Delivery, sequence: UInt64?) async throws {
         guard !closed.value else { throw QUICError.connectionClosed }
         let header: StreamHeaderInfo
@@ -390,6 +413,20 @@ final class QUICConnection: PeerConnection, @unchecked Sendable {
         case .datagram:
             header = StreamHeaderInfo(kind: .message, label: QUICStreamHeaderCodec.datagramMarker)
         }
+        if payload.count > Self.channelMaxPayload {
+            try await sendDataOnDedicatedStream(payload, header: header)
+            return
+        }
+        // Messages ride the persistent channel (failure mode 13: per-message
+        // streams exhaust the connection's lifetime stream budget).
+        try await messagesWriter.send(
+            headerBytes: QUICStreamHeaderCodec.encode(header),
+            payload: payload,
+            open: { [self] in try await openMessagesStream() })
+    }
+
+    /// Dedicated-stream fallback for oversized messages (FR-15 allows 16 MB).
+    private func sendDataOnDedicatedStream(_ payload: Data, header: StreamHeaderInfo) async throws {
         let stream = try await openDedicatedStream(header: header)
         Self.dedicatedOpened.withLock { $0 += 1 }
         do {
@@ -409,6 +446,16 @@ final class QUICConnection: PeerConnection, @unchecked Sendable {
             quicRetire(stream)
             Self.dedicatedRetired.withLock { $0 += 1 }
         }
+    }
+
+    /// Open this side's message channel: tag `0x02`, then framed messages for
+    /// the connection's lifetime.
+    private func openMessagesStream() async throws -> NWConnection {
+        guard let stream = openGroupStream() else { throw QUICError.connectionClosed }
+        try await quicAwaitReady(stream, queue: queue)
+        try await quicSend(stream, Data([QUICFraming.StreamTag.messages.rawValue]))
+        quicDebug("messages channel: opened")
+        return stream
     }
 
     func openOutgoingStream(header: StreamHeaderInfo) async throws -> any PeerByteStream {
@@ -441,6 +488,7 @@ final class QUICConnection: PeerConnection, @unchecked Sendable {
     func close() async {
         guard closed.compareAndSet(expected: false, new: true) else { return }
         onTerminated?()
+        await messagesWriter.close()
         control.value?.cancel()
         group.cancel()
         eventsContinuation.yield(.closed)
@@ -473,6 +521,39 @@ private actor ControlWriter {
         out.append(QUICFraming.lengthPrefix(frame.count))
         out.append(frame)
         try await quicSend(connection, out)
+    }
+}
+
+/// Owns this side's persistent message channel: opens it lazily on first send
+/// and serializes writes, so concurrent `send` calls interleave whole
+/// [header][payload] units, never partial frames.
+private actor MessagesWriter {
+    private var stream: NWConnection?
+
+    func send(
+        headerBytes: Data, payload: Data, open: () async throws -> NWConnection
+    ) async throws {
+        if stream == nil { stream = try await open() }
+        guard let stream else { throw QUICError.connectionClosed }
+        var out = Data()
+        out.append(QUICFraming.lengthPrefix(headerBytes.count))
+        out.append(headerBytes)
+        out.append(QUICFraming.lengthPrefix(payload.count))
+        out.append(payload)
+        do {
+            try await quicSend(stream, out)
+        } catch {
+            // Channel died with the send un-framed on the wire — retire it;
+            // the next send opens a fresh channel.
+            quicRetire(stream)
+            self.stream = nil
+            throw error
+        }
+    }
+
+    func close() {
+        if let stream { quicRetire(stream) }
+        stream = nil
     }
 }
 

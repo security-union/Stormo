@@ -5,24 +5,21 @@ import Testing
 
 #if canImport(Network) && canImport(Security)
 
-/// Functional stream-churn soak (related: TODO(churn-benchmark) measures the
-/// ceiling; this asserts correctness past the credit boundary).
-///
-/// Every message rides its own QUIC stream (DD-7) inside one connection whose
-/// peers grant `initialMaxStreams* = 2048`. Credit comes back only when a
-/// stream FULLY closes (both directions). A session that leaks stream closes
-/// stalls at the initial limit — at remote-shutter's ~66 streams/sec that is
-/// ~60 s into a healthy session, surfacing as sends timing out and then the
-/// idle timeout collapsing the connection.
+/// Message-churn soak (failure mode 13). Messages ride the persistent
+/// channel, so churn no longer consumes the connection's lifetime stream
+/// budget; oversized payloads take a dedicated stream, which must be retired
+/// (no zombie handles). Related: TODO(churn-benchmark) measures the ceiling;
+/// this asserts correctness at volume.
 @Suite("QUIC stream churn", .serialized)
 struct QUICStreamChurnTests {
 
-    @Test("A session survives message churn past the initial stream credit (2048)", .timeLimit(.minutes(4)))
+    @Test("A session survives message churn far past the old per-stream budget", .timeLimit(.minutes(4)))
     func churnPastInitialCredit() async throws {
         guard QUICTransport.isTLSIdentityAvailable(for: PeerIdentity(name: "probe")) else {
             print("[skip] QUIC: no TLS identity in this environment"); return
         }
-        let messageCount = 2_200  // past the 2048 initial stream limit
+        let smallCount = 2_200  // would exceed the old 2048 stream budget
+        let bigPayload = Data(repeating: 0xB1, count: QUICConnection.channelMaxPayload + 1)
 
         let rv = Rendezvous()
         func t() -> QUICTransport { QUICTransport(configuration: .init(discovery: .rendezvous(rv))) }
@@ -39,24 +36,24 @@ struct QUICStreamChurnTests {
         _ = try await monitor.invite(try #require(discovered), context: Data())
         await accept.value
 
-        let received = Task<Int, Never> {
-            var count = 0
-            for await _ in camera.messages {
-                count += 1
-                if count == messageCount { break }
+        let received = Task<(small: Int, big: Int), Never> {
+            var small = 0
+            var big = 0
+            for await message in camera.messages {
+                if message.payload.count > QUICConnection.channelMaxPayload { big += 1 } else { small += 1 }
+                if small == smallCount && big == 1 { break }
             }
-            return count
+            return (small, big)
         }
 
-        // Bounded concurrency: fast enough to cross the credit boundary in CI,
-        // and the shape of a real frame-streaming sender.
+        // Bounded concurrency: the shape of a real frame-streaming sender.
         let width = 32
         var sendFailure: (index: Int, error: any Error)?
         await withTaskGroup(of: (Int, (any Error)?).self) { group in
             var next = 1
             var inFlight = 0
-            while next <= messageCount || inFlight > 0 {
-                while next <= messageCount && inFlight < width {
+            while next <= smallCount || inFlight > 0 {
+                while next <= smallCount && inFlight < width {
                     let n = next
                     next += 1
                     inFlight += 1
@@ -75,19 +72,23 @@ struct QUICStreamChurnTests {
                 }
             }
         }
+        // Oversized message: dedicated-stream fallback (FR-15 16 MB support).
+        try await monitor.send(bigPayload, delivery: .reliable)
+
         if let sendFailure {
-            Issue.record(
-                "send #\(sendFailure.index) failed: \(sendFailure.error) — stream credit exhausted?")
+            Issue.record("send #\(sendFailure.index) failed: \(sendFailure.error)")
             received.cancel()
         }
 
-        #expect(await received.value == messageCount)
+        let counts = await received.value
+        #expect(counts.small == smallCount)
+        #expect(counts.big == 1)
         await monitor.disconnect()
         await camera.disconnect()
 
-        // No zombie streams (failure mode 13): every opened message-stream
-        // handle must retire. Retirement is asynchronous (the sender's retire
-        // follows the receiver's), so poll briefly before judging.
+        // No zombie dedicated streams (failure mode 13): the oversized message
+        // opened one handle per side; every opened handle must retire.
+        // Retirement is asynchronous, so poll briefly before judging.
         let deadline = Date().addingTimeInterval(10)
         while QUICConnection.dedicatedOpened.value != QUICConnection.dedicatedRetired.value,
             Date() < deadline
@@ -96,7 +97,7 @@ struct QUICStreamChurnTests {
         }
         let opened = QUICConnection.dedicatedOpened.value
         let retired = QUICConnection.dedicatedRetired.value
-        #expect(opened >= messageCount * 2)  // sender + receiver handles
+        #expect(opened >= 2)  // big message: sender + receiver handles
         #expect(retired == opened, "zombie streams: \(opened - retired) opened, never retired")
     }
 }

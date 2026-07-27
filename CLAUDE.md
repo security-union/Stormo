@@ -117,20 +117,22 @@ code that guards them without understanding why it exists.
     resolve path is exercised by CI but NOT yet validated on pre-26 hardware
     over AWDL (see mesh-hardware in the TODO ledger).
 13. **The initial stream allowance is the connection's LIFETIME budget —
-    this QUIC stack never extends MAX_STREAMS as streams close.** Stream-
-    per-message sessions hit the `initialMaxStreams*` wall no matter how
-    cleanly streams are closed (~60 s at remote-shutter's rate with the old
-    2048): new sends stuck in `.preparing`, ready-timeouts, then idle-
-    timeout collapse, with `nw_connection_copy_protocol_metadata` noise.
-    Limits are set to 2^30 (a transport parameter, not an allocation).
-    Spent streams are still retired for handle hygiene, with two traps:
+    this QUIC stack never extends MAX_STREAMS as streams close.** Per-
+    message streams hit the `initialMaxStreams*` wall no matter how cleanly
+    they close (~60 s at remote-shutter's rate with the old 2048): sends
+    stuck in `.preparing`, ready-timeouts, then idle-timeout collapse.
+    Resolution (DD-7 hardware amendment): messages ride a persistent
+    per-direction channel (tag `0x02`, framed StreamHeader+payload);
+    dedicated streams remain only for >1 MiB payloads, transfers, and app
+    streams, with limits at 2^30 (a transport parameter, not an
+    allocation). Dedicated streams are retired when spent, with two traps:
     (a) the awaited `.finalMessage` write-close means processed-by-the-
     stack, NOT delivered — a sender cancelling right after it aborts the
     payload (verified on loopback); the sender retires when its receive
-    ends, which the receiver's retire triggers; (b) retire = detach the
-    state observer, THEN cancel — inbound streams carry a failure observer
-    that treats `.cancelled` as transport failure and closes the whole
-    connection. Guarded by the stream-churn soak test.
+    ends, which the receiver's retire triggers; (b) `quicRetire` detaches
+    the state observer BEFORE cancel — inbound streams carry a failure
+    observer that treats `.cancelled` as transport failure and closes the
+    whole connection. Guarded by the stream-churn soak test.
 
 ## TODO ledger (single authoritative list)
 

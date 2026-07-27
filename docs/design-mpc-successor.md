@@ -242,6 +242,23 @@ Every reliable application message travels on its **own unidirectional QUIC stre
 
 **Costs/risks accepted:** ~30–50 bytes of `StreamHeader` overhead per message (negligible at 16 MB cap, measurable at 60 Hz tiny messages — datagrams are the right tool there anyway); per-stream open/teardown cost in Network.framework is unmeasured → **Spike S-6** (stream-churn rate; MoQ implementations sustain thousands of streams/sec, but `NWConnection`'s QUIC stream surface must be validated — interacts with S-3's multiplex-group question).
 
+**Hardware amendment (failure mode 13) — messages ride a persistent channel.**
+S-6 resolved against per-message streams on this platform: Apple's
+`NWConnectionGroup` QUIC treats `initialMaxStreams*` as the connection's
+*lifetime* stream budget (MAX_STREAMS is never extended as streams close), and
+each spent stream costs a handle-retirement dance with reset-noise per
+message. Messages of every delivery mode therefore travel on one persistent
+per-direction **message channel** (stream tag `0x02`): repeating size-prefixed
+`StreamHeader` + size-prefixed payload, written serially per sender. The
+`StreamHeader` vocabulary, delivery semantics, and `.reliableOrdered` reorder
+buffer are unchanged. Dedicated per-message streams remain for payloads above
+the channel frame cap (1 MiB — preserves FR-15's 16 MB), and transfers/app
+streams keep their own streams (QA-4: bulk never head-of-line blocks
+messaging). Cost accepted: `.reliable` messages share the channel, so radio
+loss can delay subsequent *small* messages at the transport level (rationale 1
+above is traded away below 1 MiB); real RFC 9221 datagrams (TODO datagrams,
+iOS 16+/macOS 13+) recover loss-independence where latency matters.
+
 ### DD-8: Custom session protocol over raw QUIC, not libp2p — **adopted**
 
 The obvious alternative to a bespoke protocol is libp2p (the IPFS-lineage modular P2P stack), especially since PeerMesh convergently shares several of its ideas (key-derived peer IDs, transport abstraction, QUIC). Rejected as the foundation, for recorded reasons:

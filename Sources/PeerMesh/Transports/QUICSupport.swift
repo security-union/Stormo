@@ -94,6 +94,11 @@ enum QUICFraming {
     enum StreamTag: UInt8 {
         case control = 0x00
         case dedicated = 0x01
+        /// Persistent per-direction message channel: [len][StreamHeader]
+        /// [len][payload] repeating. Messages ride this one stream (failure
+        /// mode 13 — stream churn exhausts the connection's lifetime stream
+        /// budget); dedicated streams remain for bulk.
+        case messages = 0x02
     }
 }
 
@@ -188,10 +193,15 @@ func quicReceiveChunk(_ connection: NWConnection, maxLength: Int = 1 << 16) asyn
 }
 
 /// Read one length-prefixed frame. Throws on FIN before/mid frame.
-func quicReceiveFrame(_ connection: NWConnection) async throws -> Data {
+/// `allowEmpty` admits zero-length frames (message payloads may be empty;
+/// control/header frames never are).
+func quicReceiveFrame(_ connection: NWConnection, allowEmpty: Bool = false) async throws -> Data {
     let header = try await quicReceiveExactly(connection, 4)
     let length = Int(header.withUnsafeBytes { $0.load(as: UInt32.self).bigEndian })
-    guard length > 0, length <= QUICFraming.maxFrame else { throw QUICError.malformedStreamHeader }
+    guard length <= QUICFraming.maxFrame, length > 0 || allowEmpty else {
+        throw QUICError.malformedStreamHeader
+    }
+    if length == 0 { return Data() }
     return try await quicReceiveExactly(connection, length)
 }
 
