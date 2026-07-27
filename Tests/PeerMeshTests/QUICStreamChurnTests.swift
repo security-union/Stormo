@@ -13,7 +13,9 @@ import Testing
 @Suite("QUIC stream churn", .serialized)
 struct QUICStreamChurnTests {
 
-    @Test("A session survives message churn far past the old per-stream budget", .timeLimit(.minutes(4)))
+    // No .timeLimit trait: it is iOS 16+ API and the floor is iOS 15 (the CI
+    // job timeout bounds a hang instead).
+    @Test("A session survives message churn far past the old per-stream budget")
     func churnPastInitialCredit() async throws {
         guard QUICTransport.isTLSIdentityAvailable(for: PeerIdentity(name: "probe")) else {
             print("[skip] QUIC: no TLS identity in this environment"); return
