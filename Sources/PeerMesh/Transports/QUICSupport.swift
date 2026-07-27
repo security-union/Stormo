@@ -351,8 +351,7 @@ enum PeerHello {
                 byteBuffer: &buffer,
                 options: VerifierOptions(maxDepth: 16, maxTableCount: 64, maxApparentSize: 1 << 16))
         else { return nil }
-        // WirePeerInfo.peerID enforces the 34-byte multihash contract — a
-        // validation the hand-rolled predecessor of this codec never had.
+        // WirePeerInfo.peerID enforces the 34-byte multihash contract.
         guard let peer = root.peer?.peerID else { return nil }
         return Decoded(
             peer: peer,
