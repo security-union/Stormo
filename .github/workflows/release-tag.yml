@@ -1,0 +1,55 @@
+name: Release Tag on Merge
+
+# Every merge to main cuts a semver tag + GitHub Release automatically —
+# no bump PR, no approval. SPM versions ARE git tags (nothing in the repo
+# stores a version), so tagging is the entire release.
+#
+# Bump type: patch by default; put "#minor" or "#major" anywhere in the PR
+# title (it lands in the squash commit subject) to bump those instead.
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  tag:
+    name: Cut release tag
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Compute and push next semver tag
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          # Re-runs and merge commits of already-tagged trees are no-ops.
+          if [ -n "$(git tag --points-at HEAD)" ]; then
+            echo "HEAD already tagged: $(git tag --points-at HEAD)"; exit 0
+          fi
+
+          LATEST=$(git tag --list '[0-9]*.[0-9]*.[0-9]*' | sort -V | tail -1)
+          if [ -z "$LATEST" ]; then
+            NEXT="0.1.0"
+          else
+            IFS=. read -r MAJ MIN PAT <<< "$LATEST"
+            SUBJECT=$(git log -1 --pretty=%s)
+            case "$SUBJECT" in
+              *"#major"*) NEXT="$((MAJ + 1)).0.0" ;;
+              *"#minor"*) NEXT="$MAJ.$((MIN + 1)).0" ;;
+              *)          NEXT="$MAJ.$MIN.$((PAT + 1))" ;;
+            esac
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag -a "$NEXT" -m "$(git log -1 --pretty=%s)"
+          git push origin "$NEXT"
+          gh release create "$NEXT" --generate-notes --title "$NEXT"
+          echo "Released $NEXT (was ${LATEST:-none})"
