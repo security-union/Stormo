@@ -18,6 +18,7 @@ final class QUICByteStream: PeerByteStream, @unchecked Sendable {
     private let queue: DispatchQueue
     private let incomingContinuation: AsyncThrowingStream<Data, Error>.Continuation
     private let finished = Locked(false)
+    private let readDone = Locked(false)
 
     /// - Parameter startReceiveLoop: when true, spins a payload-to-FIN read loop
     ///   feeding `incoming`. (The header has already been consumed by the caller.)
@@ -27,12 +28,25 @@ final class QUICByteStream: PeerByteStream, @unchecked Sendable {
         self.queue = queue
         (self.incoming, self.incomingContinuation) = AsyncThrowingStream.makeStream()
         if startReceiveLoop {
-            let (conn, cont) = (connection, incomingContinuation)
-            Task { await Self.pump(conn, cont) }
+            // The task retains self: deinit cannot fire while a read loop is
+            // live, so consumers may iterate `incoming` without also keeping
+            // the stream object alive.
+            Task { [self] in
+                await Self.pump(connection, incomingContinuation)
+                // Full close returns QUIC stream credit (failure mode 13).
+                readDone.value = true
+                if finished.value { quicRetire(connection) }
+            }
         } else {
+            readDone.value = true
             incomingContinuation.finish()
         }
     }
+
+    /// RAII backstop: runs once the owner dropped the stream AND no read loop
+    /// is live. `cancel` is idempotent; fully-closed duplex streams already
+    /// cancelled in `finish`/pump completion.
+    deinit { quicRetire(connection) }
 
     private static func pump(
         _ connection: NWConnection,
@@ -59,6 +73,7 @@ final class QUICByteStream: PeerByteStream, @unchecked Sendable {
         guard !finished.value else { return }
         finished.value = true
         await quicFinish(connection)
+        if readDone.value { quicRetire(connection) }
     }
 }
 

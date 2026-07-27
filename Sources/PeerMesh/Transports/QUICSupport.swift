@@ -139,6 +139,15 @@ func quicFinish(_ connection: NWConnection) async {
     }
 }
 
+/// Deliberate local close of a spent stream. Detaches the state observer
+/// FIRST: inbound streams carry a failure observer that treats `.cancelled`
+/// as a transport failure and closes the whole connection — a bare `cancel`
+/// on a spent stream kills the session.
+func quicRetire(_ connection: NWConnection) {
+    connection.stateUpdateHandler = nil
+    connection.cancel()
+}
+
 /// Start a stream we received from `newConnectionHandler` (advertiser side).
 /// Such streams become receivable immediately and do **not** fire a `.ready`
 /// transition, so we start them (attaching a failure observer) and receive

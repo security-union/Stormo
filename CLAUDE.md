@@ -116,6 +116,21 @@ code that guards them without understanding why it exists.
     `.service` dial is kept on 26+ where it is hardware-validated. The pre-26
     resolve path is exercised by CI but NOT yet validated on pre-26 hardware
     over AWDL (see mesh-hardware in the TODO ledger).
+13. **The initial stream allowance is the connection's LIFETIME budget —
+    this QUIC stack never extends MAX_STREAMS as streams close.** Stream-
+    per-message sessions hit the `initialMaxStreams*` wall no matter how
+    cleanly streams are closed (~60 s at remote-shutter's rate with the old
+    2048): new sends stuck in `.preparing`, ready-timeouts, then idle-
+    timeout collapse, with `nw_connection_copy_protocol_metadata` noise.
+    Limits are set to 2^30 (a transport parameter, not an allocation).
+    Spent streams are still retired for handle hygiene, with two traps:
+    (a) the awaited `.finalMessage` write-close means processed-by-the-
+    stack, NOT delivered — a sender cancelling right after it aborts the
+    payload (verified on loopback); the sender retires when its receive
+    ends, which the receiver's retire triggers; (b) retire = detach the
+    state observer, THEN cancel — inbound streams carry a failure observer
+    that treats `.cancelled` as transport failure and closes the whole
+    connection. Guarded by the stream-churn soak test.
 
 ## TODO ledger (single authoritative list)
 
@@ -129,7 +144,6 @@ In-code TODOs reference these by name: `// TODO(ledger-name): one line`.
 - **ui-completion** — PeerMeshUI beyond the current skeleton.
 - **mesh-join** — join via endpoint exchange for gossiped roster members (roster names peers we haven't discovered).
 - **send-ack** — send-acknowledgement API (`PeerSession.send` returns before transport handoff).
-- **compat-identity-persistence** — MPCCompat per-name identity persistence (sessions currently use an ephemeral key per `CompatCore`).
 - **mesh-hardware** — S-2 mesh-ceiling and S-5 backgrounding hardware spikes.
 - **liveness** — FR-14 liveness detection beyond the transport idle timeout.
 

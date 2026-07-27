@@ -322,6 +322,9 @@ final class QUICConnection: PeerConnection, @unchecked Sendable {
             }
             quicDebug("dedicated: yielding data \(payload.count)B")
             eventsContinuation.yield(.data(payload, delivery, sequence: sequence))
+            // Receiver half of failure mode 13: the stream is spent once FIN
+            // is read; this retire is what releases the sender's wait.
+            quicRetire(stream)
 
         case .transferChunk, .appStream:
             let label = header.label ?? ""
@@ -377,7 +380,21 @@ final class QUICConnection: PeerConnection, @unchecked Sendable {
             header = StreamHeaderInfo(kind: .message, label: QUICStreamHeaderCodec.datagramMarker)
         }
         let stream = try await openDedicatedStream(header: header)
-        try await quicSend(stream, payload, isComplete: true)
+        do {
+            try await quicSend(stream, payload, isComplete: true)
+        } catch {
+            quicRetire(stream)  // abort — the peer discards partial reads
+            throw error
+        }
+        // Failure mode 13: retire only once the peer ends the stream (the
+        // receiver's retire propagates as a receive error here). The awaited
+        // write-close means processed-by-the-stack, not delivered — a cancel
+        // issued now aborts the queued payload. Detached: send() latency
+        // stays payload-only.
+        Task {
+            _ = try? await quicReceiveChunk(stream)
+            quicRetire(stream)
+        }
     }
 
     func openOutgoingStream(header: StreamHeaderInfo) async throws -> any PeerByteStream {

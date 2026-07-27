@@ -57,11 +57,14 @@ final class CompatCore: @unchecked Sendable {
         self.serviceType = serviceType
         self.transport = transport
         // We only hold the app's PeerID (public-key hash + display name), never
-        // its private key, so we derive a fresh key-derived identity for the
-        // underlying session. Remote peer IDs surfaced to delegates therefore
-        // carry the PeerMesh identity's key hash (stable per device/session),
-        // not a hash the app could precompute — see MultipeerSession docs.
-        self.identity = PeerIdentity(name: peer.displayName)
+        // its private key, so the underlying session runs a PeerMesh identity
+        // keyed on the display name — persisted (FR-20), so every screen visit
+        // and relaunch presents the SAME peer. Without persistence each core
+        // minted a fresh key, and browsers piled up ghost entries of one
+        // device whose stale endpoints then failed every dial. Remote peer IDs
+        // surfaced to delegates carry that identity's key hash, not a hash the
+        // app could precompute — see MultipeerSession docs.
+        self.identity = PeerIdentity.loadOrCreate(name: peer.displayName)
         self.delegateQueue = DispatchQueue(label: "mpccompat.core.\(serviceType)")
     }
 
