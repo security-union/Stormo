@@ -51,9 +51,11 @@ final class QUICLocalIdentity: @unchecked Sendable {
 enum QUICTLS {
 
     /// QUIC PING interval, seconds — enabled per connection on both sides
-    /// (`quicEnableKeepalive`). Engine-level keepalive signals remain until
-    /// PING-only interface assertion is validated on AWDL hardware (failure
-    /// mode 9 was proven with engine keepalives).
+    /// (`quicEnableKeepalive`). The SOLE keepalive layer: engine keepalive
+    /// signals were removed 2026-07 (inbound ones are still tolerated for
+    /// wire compat). PING-only AWDL interface assertion is pending hardware
+    /// validation — TODO(mesh-hardware); failure mode 9 was originally
+    /// proven with engine keepalives running.
     static let keepaliveSeconds = 5
 
     /// FROZEN. Version gating is the PeerHello semver (same-major interop) —
