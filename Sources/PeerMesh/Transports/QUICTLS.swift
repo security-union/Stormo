@@ -56,7 +56,7 @@ enum QUICTLS {
     /// wire compat). PING-only AWDL interface assertion is pending hardware
     /// validation — TODO(mesh-hardware); failure mode 9 was originally
     /// proven with engine keepalives running.
-    static let keepaliveSeconds = 5
+    static let keepaliveSeconds = 1
 
     /// FROZEN. Version gating is the PeerHello semver (same-major interop) —
     /// bumping the ALPN would fail the handshake before hello, turning a
@@ -200,11 +200,13 @@ enum QUICTLS {
         isListener: Bool
     ) -> NWParameters {
         let quic = NWProtocolQUIC.Options(alpn: [alpn])
-        // 15 s idle + 5 s transport keepalive (``QUICTLS/keepaliveSeconds``):
-        // a healthy tunnel never idles (PING every 5 s), so idling out means
-        // ~3 missed keepalives — a dead peer surfaces as a connection failure
-        // in seconds instead of half a minute.
-        quic.idleTimeout = 15_000
+        // 5 s idle + 1 s transport keepalive (``QUICTLS/keepaliveSeconds``):
+        // a healthy tunnel never idles (PING every 1 s), so idling out means
+        // ~5 missed keepalives — a dead peer surfaces as a connection failure
+        // within 5 s. Caveats this timing implies: an iOS app suspended in
+        // the background loses its sessions in ~5 s (S-5 spike territory),
+        // and pausing a peer in the debugger >5 s kills its connections.
+        quic.idleTimeout = 5_000
         quic.initialMaxData = 1 << 24
         quic.initialMaxStreamDataBidirectionalLocal = 1 << 20
         quic.initialMaxStreamDataBidirectionalRemote = 1 << 20

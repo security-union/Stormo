@@ -17,12 +17,12 @@ import PeerMeshTestKit
 //    QUIC via `KillSwitchTransport`.
 // 3. True silence    — the peer stops responding entirely (radio walk-away,
 //    SIGKILL): detection falls to the connection-level heartbeats, which are
-//    ALWAYS ON (failure mode 9: QUIC PINGs every 5 s via
-//    `quicEnableKeepalive`, 15 s idle timeout ⇒ a dead peer surfaces as a
-//    connection failure after ~3 missed PINGs). Loopback cannot fake silence
+//    ALWAYS ON (failure mode 9: QUIC PINGs every 1 s via
+//    `quicEnableKeepalive`, 5 s idle timeout ⇒ a dead peer surfaces as a
+//    connection failure after ~5 missed PINGs). Loopback cannot fake silence
 //    inside one process, so this shape is asserted cross-process in
 //    `Scripts/e2e-cli.sh` (kill -9 the lingering joiner; host must observe
-//    `.left` within 30 s).
+//    `.left` within 10 s).
 //
 // Engine-level liveness beyond the transport bound stays TODO(liveness).
 // =============================================================================
@@ -176,7 +176,7 @@ struct QUICDisconnectionTests {
         let killedAt = Date()
         await killSwitch.kill()
 
-        // Close propagation, not heartbeat expiry: well under the 15 s idle
+        // Close propagation, not heartbeat expiry: well under the 5 s idle
         // timeout. (The true-silence path — no close at all — is the
         // cross-process kill -9 scenario in Scripts/e2e-cli.sh.)
         let deadline = Date().addingTimeInterval(10)

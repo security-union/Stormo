@@ -5,7 +5,7 @@
 #     (caught the QUIC FIN bug and the inbound-retention bug).
 #   Scenario 2: silent peer death — kill -9 a lingering joiner; the host must
 #     detect the loss via connection-level heartbeats ALONE (failure mode 9:
-#     5 s QUIC PINGs, 15 s idle timeout). Only a separate killed process is
+#     1 s QUIC PINGs, 5 s idle timeout). Only a separate killed process is
 #     truly silent on the wire; in-process tests can't fake this.
 set -euo pipefail
 
@@ -64,9 +64,9 @@ grep -q "LINGERING" "$LOGDIR/join2.log" \
 JOIN2_PID=""
 KILLED_AT=$(date +%s)
 
-# Detection bound: 15 s idle (~3 missed PINGs) + margin. 35 s poll ceiling.
+# Detection bound: 5 s idle (~5 missed PINGs) + margin. 20 s poll ceiling.
 DETECTED=0
-for _ in $(seq 1 35); do
+for _ in $(seq 1 20); do
   if ! kill -0 "$HOST2_PID" 2>/dev/null; then DETECTED=1; break; fi
   sleep 1
 done
@@ -79,7 +79,7 @@ fi
 HOST2_PID=""
 grep -q "SUCCESS (host, --once)" "$LOGDIR/host2.log" \
   || { echo "FAIL: host did not observe .left"; cat "$LOGDIR/host2.log"; exit 1; }
-[ "$ELAPSED" -le 30 ] \
-  || { echo "FAIL: detection took ${ELAPSED}s (heartbeat bound is ~15 s)"; exit 1; }
+[ "$ELAPSED" -le 10 ] \
+  || { echo "FAIL: detection took ${ELAPSED}s (heartbeat bound is ~5 s)"; exit 1; }
 
 echo "PASS: silent peer death detected by heartbeats in ${ELAPSED}s"

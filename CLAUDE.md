@@ -98,9 +98,9 @@ code that guards them without understanding why it exists.
    `.bonjour` (AWDL-capable; PeerID from the instance name) + TXT browse as
    enrichment. Consumers must treat `.found` and `.updated` uniformly.
 9. **AWDL requires foreground + screen on.** Idle-looking links get torn down by
-   iOS 26 (the bug that killed MPC). QUIC-level PINGs every 5 s are the SINGLE
+   iOS 26 (the bug that killed MPC). QUIC-level PINGs every 1 s are the SINGLE
    keepalive layer (`quicEnableKeepalive`, no app traffic, also = fast
-   dead-peer detection at ~3 missed PINGs against the 15 s idle timeout).
+   dead-peer detection at ~5 missed PINGs against the 5 s idle timeout).
    Engine keepAlive signals were removed 2026-07 (inbound ones still tolerated
    for wire compat; `Configuration.keepAliveInterval` is inert 1.x API) —
    PING-only AWDL interface assertion MUST be validated in the mesh-hardware
