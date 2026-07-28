@@ -18,9 +18,8 @@ public enum PeerMesh_Wire_SignalBody: UInt8, UnionEnum {
   case inviteresponse = 2
   case codeconfirm = 3
   case rosterupdate = 4
-  case keepalive = 5
-  case transferoffer = 6
-  case streamopen = 7
+  case transferoffer = 5
+  case streamopen = 6
 
   public static var max: PeerMesh_Wire_SignalBody { return .streamopen }
   public static var min: PeerMesh_Wire_SignalBody { return .none_ }
@@ -254,42 +253,6 @@ public struct PeerMesh_Wire_RosterUpdate: FlatBufferObject, Verifiable {
   }
 }
 
-///  Liveness probe; also carries the peer's send-timestamp for RTT estimation.
-public struct PeerMesh_Wire_KeepAlive: FlatBufferObject, Verifiable {
-
-  static func validateVersion() { FlatBuffersVersion_25_2_10() }
-  public var __buffer: ByteBuffer! { return _accessor.bb }
-  private var _accessor: Table
-
-  private init(_ t: Table) { _accessor = t }
-  public init(_ bb: ByteBuffer, o: Int32) { _accessor = Table(bb: bb, position: o) }
-
-  private enum VTOFFSET: VOffset {
-    case timestampMs = 4
-    var v: Int32 { Int32(self.rawValue) }
-    var p: VOffset { self.rawValue }
-  }
-
-  public var timestampMs: UInt64 { let o = _accessor.offset(VTOFFSET.timestampMs.v); return o == 0 ? 0 : _accessor.readBuffer(of: UInt64.self, at: o) }
-  public static func startKeepAlive(_ fbb: inout FlatBufferBuilder) -> UOffset { fbb.startTable(with: 1) }
-  public static func add(timestampMs: UInt64, _ fbb: inout FlatBufferBuilder) { fbb.add(element: timestampMs, def: 0, at: VTOFFSET.timestampMs.p) }
-  public static func endKeepAlive(_ fbb: inout FlatBufferBuilder, start: UOffset) -> Offset { let end = Offset(offset: fbb.endTable(at: start)); return end }
-  public static func createKeepAlive(
-    _ fbb: inout FlatBufferBuilder,
-    timestampMs: UInt64 = 0
-  ) -> Offset {
-    let __start = PeerMesh_Wire_KeepAlive.startKeepAlive(&fbb)
-    PeerMesh_Wire_KeepAlive.add(timestampMs: timestampMs, &fbb)
-    return PeerMesh_Wire_KeepAlive.endKeepAlive(&fbb, start: __start)
-  }
-
-  public static func verify<T>(_ verifier: inout Verifier, at position: Int, of type: T.Type) throws where T: Verifiable {
-    var _v = try verifier.visitTable(at: position)
-    try _v.visit(field: VTOFFSET.timestampMs.p, fieldName: "timestampMs", required: false, type: UInt64.self)
-    _v.finish()
-  }
-}
-
 ///  Announces an incoming resource transfer on a dedicated stream (FR-17).
 public struct PeerMesh_Wire_TransferOffer: FlatBufferObject, Verifiable {
 
@@ -426,8 +389,6 @@ public struct PeerMesh_Wire_Signal: FlatBufferObject, Verifiable {
         try ForwardOffset<PeerMesh_Wire_CodeConfirm>.verify(&verifier, at: pos, of: PeerMesh_Wire_CodeConfirm.self)
       case .rosterupdate:
         try ForwardOffset<PeerMesh_Wire_RosterUpdate>.verify(&verifier, at: pos, of: PeerMesh_Wire_RosterUpdate.self)
-      case .keepalive:
-        try ForwardOffset<PeerMesh_Wire_KeepAlive>.verify(&verifier, at: pos, of: PeerMesh_Wire_KeepAlive.self)
       case .transferoffer:
         try ForwardOffset<PeerMesh_Wire_TransferOffer>.verify(&verifier, at: pos, of: PeerMesh_Wire_TransferOffer.self)
       case .streamopen:

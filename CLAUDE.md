@@ -101,10 +101,10 @@ code that guards them without understanding why it exists.
    iOS 26 (the bug that killed MPC). QUIC-level PINGs every 1 s are the SINGLE
    keepalive layer (`quicEnableKeepalive`, no app traffic, also = fast
    dead-peer detection at ~5 missed PINGs against the 5 s idle timeout).
-   Engine keepAlive signals were removed 2026-07 (inbound ones still tolerated
-   for wire compat; `Configuration.keepAliveInterval` is inert 1.x API) —
-   PING-only AWDL interface assertion MUST be validated in the mesh-hardware
-   spike before radio release.
+   Engine keepAlive signals were removed entirely 2026-07 (schema slot
+   included — pre-deployment break, decided deliberately) — PING-only AWDL
+   interface assertion MUST be validated in the mesh-hardware spike before
+   radio release.
 10. **`includePeerToPeer` breaks same-machine self-dials.** Use
     `PEERMESH_NO_P2P=1` for in-process tests; CI sets it for every
     same-machine job. Note `ProcessInfo.environment` caches at first access;

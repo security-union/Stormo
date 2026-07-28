@@ -56,7 +56,6 @@ public struct ProtocolEngine: Sendable {
 
     public enum TimerKey: Hashable, Sendable {
         case invitation(PeerID)
-        case keepAlive(PeerID)
     }
 
     public enum Event: Sendable, Equatable {
@@ -85,17 +84,8 @@ public struct ProtocolEngine: Sendable {
     public struct Configuration: Sendable {
         public var invitationTimeout: TimeInterval
 
-        /// INERT since engine keepalives were removed: QUIC-native PINGs
-        /// (`quicEnableKeepalive`, 5 s) are the sole keepalive layer — they
-        /// hold the tunnel under its idle timeout and are expected to assert
-        /// AWDL interface use (PING-only assertion pending hardware
-        /// validation, TODO(mesh-hardware)). Retained for 1.x API stability;
-        /// remove at the next major.
-        public var keepAliveInterval: TimeInterval
-
-        public init(invitationTimeout: TimeInterval = 30, keepAliveInterval: TimeInterval = 5) {
+        public init(invitationTimeout: TimeInterval = 30) {
             self.invitationTimeout = invitationTimeout
-            self.keepAliveInterval = keepAliveInterval
         }
     }
 
@@ -175,12 +165,6 @@ public struct ProtocolEngine: Sendable {
                 .closeConnection(peer),  // FR-9: half-open state cleanup
             ]
 
-        case .timerFired(.keepAlive):
-            // Inert: engine keepalives were removed — QUIC-native PINGs
-            // (`quicEnableKeepalive`) are the sole keepalive layer. The case
-            // stays because `TimerKey.keepAlive` is public 1.x API; a stale
-            // timer must no-op, never send or re-arm.
-            return []
         }
     }
 
@@ -299,9 +283,6 @@ public struct ProtocolEngine: Sendable {
                 }
             }
             return effects
-
-        case .keepAlive:
-            return []
 
         case .codeConfirm:
             // TODO(pairing-code): `.pairingCode` transcript verification (DD-2, S-4).
