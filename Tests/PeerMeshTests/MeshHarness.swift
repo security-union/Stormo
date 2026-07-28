@@ -180,14 +180,20 @@ struct PumpMetrics: Sendable {
 /// interleaving across the N×(N-1) directed links is where reliability bugs
 /// live. Receipt collection is deadline-bounded: on loss the pump returns the
 /// partial inboxes for the assertions to name precisely, it never hangs.
+/// `indices` maps array position → the peer-name index each session stamps in
+/// its envelopes (default positional). Pass it when pumping a SUBSET of a
+/// mesh — e.g. survivors [1...] after peer-0 departed — so envelope sender
+/// ids still match the sessions' "peer-N" identities.
 func pump(
     _ sessions: [PeerSession],
     delivery: Delivery,
     messagesPerSender: Int,
     size: @escaping @Sendable (Int) -> Int,
+    indices: [Int]? = nil,
     timeout: TimeInterval = 60
 ) async throws -> (inboxes: [[MeshDelivery]], corrupt: Int, metrics: PumpMetrics) {
     let n = sessions.count
+    let ids = indices ?? Array(0 ..< n)
     let expectedPerReceiver = (n - 1) * messagesPerSender
     let boxes = sessions.map { _ in Locked<[MeshDelivery]>([]) }
     let corrupt = Locked(0)
@@ -214,7 +220,8 @@ func pump(
     }
 
     try await withThrowingTaskGroup(of: Void.self) { group in
-        for (sender, session) in sessions.enumerated() {
+        for (position, session) in sessions.enumerated() {
+            let sender = ids[position]
             group.addTask {
                 for seq in 0 ..< messagesPerSender {
                     try await session.send(
@@ -258,12 +265,14 @@ func assertMeshDelivery(
     delivery: Delivery,
     messagesPerSender: Int,
     ordered: Bool,
+    indices: [Int]? = nil,
     sourceLocation: SourceLocation = #_sourceLocation
 ) {
-    let n = inboxes.count
+    let ids = indices ?? Array(0 ..< inboxes.count)
     #expect(corrupt == 0, "\(corrupt) corrupt/truncated payloads", sourceLocation: sourceLocation)
 
-    for (receiver, inbox) in inboxes.enumerated() {
+    for (position, inbox) in inboxes.enumerated() {
+        let receiver = ids[position]
         var wrongDelivery = 0
         var misattributed = 0
         var arrivals: [Int: [Int]] = [:]  // sender → seqs in arrival order
@@ -281,7 +290,7 @@ func assertMeshDelivery(
             "receiver \(receiver): \(misattributed) records whose envelope sender ≠ wire sender",
             sourceLocation: sourceLocation)
 
-        for sender in 0 ..< n where sender != receiver {
+        for sender in ids where sender != receiver {
             let seqs = arrivals[sender] ?? []
             let unique = Set(seqs)
             let missing = Set(0 ..< messagesPerSender).subtracting(unique)

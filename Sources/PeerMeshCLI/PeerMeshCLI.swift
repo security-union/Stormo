@@ -9,7 +9,7 @@ import PeerMesh
 ///     peermesh advertise [--service _pmdemo._udp] [--name A] [--meta k=v]...
 ///     peermesh browse    [--service _pmdemo._udp] [--timeout 30]
 ///     peermesh host      [--service ...] [--name A] [--once]
-///     peermesh join      [--service ...] [--name B] [--peer A] [--send ping]
+///     peermesh join      [--service ...] [--name B] [--peer A] [--send ping] [--linger]
 ///
 /// `host` advertises, auto-accepts invitations, echoes every message back
 /// ("pong: <text>"). `join` browses, invites the first (or --peer named) peer,
@@ -156,6 +156,15 @@ struct PeerMeshCLI {
                     let reply = String(data: message.payload, encoding: .utf8) ?? "\(message.payload.count)B"
                     log("recv \"\(reply)\" from \(message.sender.displayName)")
                     break
+                }
+                if options["linger"] != nil {
+                    // Silent-death harness (e2e-cli.sh scenario 2): stay
+                    // connected until SIGKILL'd, so the host must detect the
+                    // loss via connection-level heartbeats alone (failure
+                    // mode 9: 5 s QUIC PINGs, 15 s idle timeout).
+                    log("LINGERING — connected; kill -9 to simulate a crash")
+                    try? await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000))
+                    exit(2)  // watchdog fires first; lingering should end in SIGKILL
                 }
                 await session.disconnect()  // clean close → host observes .left
                 log("SUCCESS")
