@@ -72,7 +72,11 @@ import PeerMeshTestKit
 /// the full reliability contract (exactly-once, integrity, attribution,
 /// per-sender order) at QA-2's 32-peer full-mesh size, with the
 /// `ReorderingTransport` axis stressing the DD-7 reorder buffer.
-@Suite("Mesh reliability over InMemoryTransport")
+///
+/// `.serialized`: 31 concurrent mesh cases oversubscribe CI's ~3-core runner
+/// — invites blow their 15 s timeout at N≈14+, and the starvation even breaks
+/// the timing-sensitive DD-7 reordering test in the neighboring suite.
+@Suite("Mesh reliability over InMemoryTransport", .serialized)
 struct InMemoryMeshReliabilityTests {
 
     /// Channel-path rungs only: framing stress, the sub-MTU datagram boundary
