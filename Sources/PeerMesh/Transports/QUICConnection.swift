@@ -14,7 +14,7 @@ import Network
 ///
 /// - **control stream** (`0x00`) — the first bidirectional stream
 ///   (dialer-opened): a `PeerHello` frame each way, then length-prefixed
-///   `SignalCodec` signals (DD-5) — invitations, roster, keepalives.
+///   `SignalCodec` signals (DD-5) — invitations, roster.
 /// - **message channel** (`0x02`) — ONE long-lived stream per direction,
 ///   lazily opened by each sender: every message ≤ 1 MiB of every delivery
 ///   mode as repeating [len][StreamHeader][len][payload] units (DD-7

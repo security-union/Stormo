@@ -9,7 +9,6 @@ public typealias WireInvite = PeerMesh_Wire_Invite
 public typealias WireInviteResponse = PeerMesh_Wire_InviteResponse
 public typealias WireCodeConfirm = PeerMesh_Wire_CodeConfirm
 public typealias WireRosterUpdate = PeerMesh_Wire_RosterUpdate
-public typealias WireKeepAlive = PeerMesh_Wire_KeepAlive
 public typealias WireTransferOffer = PeerMesh_Wire_TransferOffer
 public typealias WireStreamOpen = PeerMesh_Wire_StreamOpen
 public typealias WireTransferId = PeerMesh_Wire_TransferId
@@ -61,7 +60,6 @@ public struct Signal: @unchecked Sendable, Equatable {
         case inviteResponse(WireInviteResponse)
         case codeConfirm(WireCodeConfirm)
         case rosterUpdate(WireRosterUpdate)
-        case keepAlive(WireKeepAlive)
         case transferOffer(WireTransferOffer)
         case streamOpen(WireStreamOpen)
         /// Absent or unrecognized union variant (forward compatibility, QA-11):
@@ -79,8 +77,6 @@ public struct Signal: @unchecked Sendable, Equatable {
             return root.body(type: WireCodeConfirm.self).map(Body.codeConfirm) ?? .unrecognized
         case .rosterupdate:
             return root.body(type: WireRosterUpdate.self).map(Body.rosterUpdate) ?? .unrecognized
-        case .keepalive:
-            return root.body(type: WireKeepAlive.self).map(Body.keepAlive) ?? .unrecognized
         case .transferoffer:
             return root.body(type: WireTransferOffer.self).map(Body.transferOffer) ?? .unrecognized
         case .streamopen:
@@ -121,12 +117,6 @@ public struct Signal: @unchecked Sendable, Equatable {
             let membersOffset = createRoster(members, in: &fbb)
             return WireRosterUpdate.createRosterUpdate(
                 &fbb, membersVectorOffset: membersOffset, epoch: epoch)
-        }
-    }
-
-    public static func keepAlive(timestampMS: UInt64) -> Signal {
-        build(.keepalive) { fbb in
-            WireKeepAlive.createKeepAlive(&fbb, timestampMs: timestampMS)
         }
     }
 

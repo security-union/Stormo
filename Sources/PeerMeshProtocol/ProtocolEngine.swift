@@ -56,7 +56,6 @@ public struct ProtocolEngine: Sendable {
 
     public enum TimerKey: Hashable, Sendable {
         case invitation(PeerID)
-        case keepAlive(PeerID)
     }
 
     public enum Event: Sendable, Equatable {
@@ -85,16 +84,8 @@ public struct ProtocolEngine: Sendable {
     public struct Configuration: Sendable {
         public var invitationTimeout: TimeInterval
 
-        /// Interval between keepalive signals to each member. Keepalives serve
-        /// two purposes on peer-to-peer Wi-Fi: they hold the QUIC tunnel under
-        /// its idle timeout, and they assert to the OS that the AWDL interface
-        /// is in use — idle-looking links invite the system to tear the
-        /// interface down mid-session (the iOS 26 behavior that killed MPC).
-        public var keepAliveInterval: TimeInterval
-
-        public init(invitationTimeout: TimeInterval = 30, keepAliveInterval: TimeInterval = 5) {
+        public init(invitationTimeout: TimeInterval = 30) {
             self.invitationTimeout = invitationTimeout
-            self.keepAliveInterval = keepAliveInterval
         }
     }
 
@@ -156,7 +147,6 @@ public struct ProtocolEngine: Sendable {
             pendingIncoming.removeValue(forKey: peer)
             if members.remove(peer) != nil {
                 // FR-14: one peer's departure never disturbs the rest.
-                effects.append(.cancelTimer(.keepAlive(peer)))
                 effects.append(.emit(.peerLeft(peer)))
             }
             return effects
@@ -175,16 +165,6 @@ public struct ProtocolEngine: Sendable {
                 .closeConnection(peer),  // FR-9: half-open state cleanup
             ]
 
-        case .timerFired(.keepAlive(let peer)):
-            // Keepalive heartbeat: holds the QUIC tunnel under its idle timeout
-            // and asserts AWDL-interface use to the OS (see Configuration).
-            // Liveness DETECTION (FR-14 unreachable) remains the transport idle
-            // timeout for now.
-            guard members.contains(peer) else { return [] }
-            return [
-                .sendSignal(.keepAlive(timestampMS: 0), to: peer),
-                .startTimer(.keepAlive(peer), duration: configuration.keepAliveInterval),
-            ]
         }
     }
 
@@ -221,7 +201,6 @@ public struct ProtocolEngine: Sendable {
             var effects: [Effect] = [
                 .sendSignal(.inviteResponse(accepted: true, roster: roster), to: peer),
                 .emit(.peerJoined(peer)),
-                .startTimer(.keepAlive(peer), duration: configuration.keepAliveInterval),
             ]
             // Gossip the new member to the rest of the mesh (FR-13). Epoch is a
             // monotonic member count for now — sufficient for single-inviter
@@ -278,7 +257,6 @@ public struct ProtocolEngine: Sendable {
             }
             members.insert(peer)
             effects.append(.emit(.peerJoined(peer)))
-            effects.append(.startTimer(.keepAlive(peer), duration: configuration.keepAliveInterval))
             // Dial roster members we don't know yet, tie-break deciding
             // direction (FR-12).
             // TODO(mesh-join): these dials should carry a session-join handshake,
@@ -305,9 +283,6 @@ public struct ProtocolEngine: Sendable {
                 }
             }
             return effects
-
-        case .keepAlive:
-            return []
 
         case .codeConfirm:
             // TODO(pairing-code): `.pairingCode` transcript verification (DD-2, S-4).
