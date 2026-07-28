@@ -2,7 +2,7 @@ import Foundation
 import Testing
 
 @testable import MPCCompat
-import PeerMesh
+import Stormo
 
 @Suite("MPCCompat shim")
 struct MPCCompatTests {
@@ -19,7 +19,7 @@ struct MPCCompatTests {
         // A session with no advertiser/browser attached has no CompatCore and
         // thus no route; send must surface that as a throw, not a trap.
         let session = MultipeerSession(peer: "T", service: "_compat._udp")
-        #expect(throws: PeerMeshError.self) {
+        #expect(throws: StormoError.self) {
             try session.send(Data([0x01]), toPeers: [], with: .reliable)
         }
     }

@@ -1,4 +1,4 @@
-# PeerMesh
+# Stormo
 
 **The open-source replacement for Apple's deprecated MultipeerConnectivity
 framework** — peer-to-peer sessions over Network.framework + QUIC.
@@ -10,7 +10,7 @@ camera app streaming live preview at 33 fps device-to-device with no
 infrastructure.
 
 ```swift
-import PeerMesh
+import Stormo
 
 let session = PeerSession(name: "Dario's iPhone", service: "_myapp._udp")
 try await session.startAdvertising()
@@ -35,7 +35,7 @@ typealias file makes it a near-drop-in swap — see
 ## Install
 
 ```swift
-.package(url: "https://github.com/security-union/PeerMesh.git", from: "1.0.0")
+.package(url: "https://github.com/security-union/Stormo.git", from: "1.0.0")
 ```
 
 Platforms: iOS 15+ · macOS 12+ · tvOS 15+ · visionOS 1+. Apps need
@@ -49,29 +49,29 @@ The recipe below is exactly how [Remote Shutter](https://github.com/security-uni
 (a shipping App Store camera app) migrated off MPC — the app diff was a few
 imports, one new file, and its peer-ID cache.
 
-**1. Add the package** to your app target, linking the `PeerMesh` and
+**1. Add the package** to your app target, linking the `Stormo` and
 `MPCCompat` products:
 
 ```swift
-.package(url: "https://github.com/security-union/PeerMesh.git", from: "1.0.0")
+.package(url: "https://github.com/security-union/Stormo.git", from: "1.0.0")
 ```
 
 **2. Check your `Info.plist`.** Same requirements as MPC:
 `NSLocalNetworkUsageDescription`, and your service type under
-`NSBonjourServices` — PeerMesh uses the `_yourservice._udp` variant (Apple's
+`NSBonjourServices` — Stormo uses the `_yourservice._udp` variant (Apple's
 guidance for MPC apps was to declare both `._tcp` and `._udp`, so most apps
 already have it).
 
 **3. Add one app-local typealias file** — this is the key to a thin diff. Your
-app keeps MPC's type names; the implementations come from MPCCompat. PeerMesh
+app keeps MPC's type names; the implementations come from MPCCompat. Stormo
 deliberately does not publish `MC`-prefixed names, so the mapping lives in
 *your* app:
 
 ```swift
-//  MultipeerCompatAliases.swift — the entire MPC → PeerMesh mapping.
+//  MultipeerCompatAliases.swift — the entire MPC → Stormo mapping.
 
 import MPCCompat
-import PeerMesh
+import Stormo
 
 public typealias MCPeerID = PeerID
 public typealias MCSession = MultipeerSession
