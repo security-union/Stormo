@@ -2,8 +2,8 @@ import Foundation
 import Testing
 
 @testable import MPCCompat
-import Stromo
-import StromoTestKit
+import Stormo
+import StormoTestKit
 
 /// End-to-end bridge tests over `InMemoryTransport` (a shared `Hub`), no radios.
 ///
@@ -304,7 +304,7 @@ extension MPCCompatE2ETests {
     /// retry fail instantly ("browser has already been cancelled").
     @Test("Disconnect then re-invite over real QUIC (MCSession retry semantics)")
     func reinviteAfterDisconnectOverQUIC() async throws {
-        setenv("Stromo_NO_P2P", "1", 1)
+        setenv("STORMO_NO_P2P", "1", 1)
         let probe = PeerIdentity(name: "compat-retry-probe")
         guard QUICTransport.isTLSIdentityAvailable(for: probe) else {
             print("[skip] no TLS identity in this environment"); return

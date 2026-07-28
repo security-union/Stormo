@@ -1,5 +1,5 @@
 import Foundation
-import Stromo
+import Stormo
 
 /// Near-drop-in replacement for `MCSession` (FR-24).
 ///
@@ -8,7 +8,7 @@ import Stromo
 /// | MultipeerConnectivity        | MPCCompat                     |
 /// |------------------------------|-------------------------------|
 /// | `MCSession`                  | `MultipeerSession`            |
-/// | `MCPeerID`                   | `Stromo.PeerID`             |
+/// | `MCPeerID`                   | `Stormo.PeerID`             |
 /// | `MCSessionDelegate`          | `MultipeerSessionDelegate`    |
 /// | `MCSessionSendDataMode`      | `MultipeerSession.SendDataMode` |
 /// | `MCSessionState`             | `MultipeerSession.PeerState`  |
@@ -51,7 +51,7 @@ public final class MultipeerSession: @unchecked Sendable {
         case connected = 2
     }
 
-    /// Source-compatibility analog of `MCEncryptionPreference`. Stromo is
+    /// Source-compatibility analog of `MCEncryptionPreference`. Stormo is
     /// ALWAYS encrypted (FR-19): `.optional` and `.none` are accepted for
     /// mechanical migration but behave as `.required`.
     public enum EncryptionPreference: Sendable {
@@ -96,7 +96,7 @@ public final class MultipeerSession: @unchecked Sendable {
     /// `MCSession(peer:securityIdentity:encryptionPreference:)` analog.
     ///
     /// - `securityIdentity` is accepted for source compatibility and ignored:
-    ///   Stromo identities are key-derived (FR-20) and managed automatically.
+    ///   Stormo identities are key-derived (FR-20) and managed automatically.
     /// - `encryptionPreference` is accepted for source compatibility; traffic
     ///   is always encrypted regardless (FR-19).
     /// - MCSession carries no service type (its advertiser/browser do); the
@@ -105,7 +105,7 @@ public final class MultipeerSession: @unchecked Sendable {
         peer peerID: PeerID,
         securityIdentity: [Any]? = nil,
         encryptionPreference: EncryptionPreference = .required,
-        service: String = "_Stromo._udp"
+        service: String = "_Stormo._udp"
     ) {
         self.init(myPeerID: peerID, service: service, transport: nil)
     }
@@ -114,7 +114,7 @@ public final class MultipeerSession: @unchecked Sendable {
     /// through the shared ``CompatCore`` to the underlying `PeerSession`.
     convenience init(
         peer peerID: PeerID,
-        service: String = "_Stromo._udp",
+        service: String = "_Stormo._udp",
         transport: any PeerTransport
     ) {
         self.init(myPeerID: peerID, service: service, transport: transport)
@@ -166,9 +166,9 @@ public final class MultipeerSession: @unchecked Sendable {
     /// (no route exists); transient delivery failures surface on the delegate
     /// path, as they do in MCSession.
     public func send(_ data: Data, toPeers peerIDs: [PeerID], with mode: SendDataMode) throws {
-        guard let core else { throw StromoError.peerUnreachable(myPeerID) }
+        guard let core else { throw StormoError.peerUnreachable(myPeerID) }
         // MPC's .unreliable allowed large payloads (raw UDP + IP
-        // fragmentation); Stromo datagrams are honest about the MTU and
+        // fragmentation); Stormo datagrams are honest about the MTU and
         // refuse them. Oversized unreliable sends degrade to .reliable —
         // unordered, guaranteed: a superset of MPC's "may be dropped"
         // promise, and the closest semantics that still deliver.
@@ -195,7 +195,7 @@ public final class MultipeerSession: @unchecked Sendable {
         withCompletionHandler completionHandler: ((Error?) -> Void)? = nil
     ) -> Progress? {
         guard let core else {
-            completionHandler?(StromoError.peerUnreachable(peerID))
+            completionHandler?(StormoError.peerUnreachable(peerID))
             return nil
         }
         return core.sendResource(
@@ -208,7 +208,7 @@ public final class MultipeerSession: @unchecked Sendable {
     /// Modern callers should use `PeerSession.openStream` (byte streams
     /// themselves are implemented; only the `NSStream` shim is not).
     public func startStream(withName streamName: String, toPeer peerID: PeerID) throws -> OutputStream {
-        throw StromoError.unimplemented("MultipeerSession.startStream")
+        throw StormoError.unimplemented("MultipeerSession.startStream")
     }
 
     public func disconnect() {

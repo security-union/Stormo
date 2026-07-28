@@ -1,4 +1,4 @@
-// Stromo transport-level identity bootstrap (PeerHello).
+// Stormo transport-level identity bootstrap (PeerHello).
 //
 // The first frame in each direction on the control stream, sent immediately
 // after the QUIC/mTLS handshake. TLS authenticates the peer's KEY; PeerHello
@@ -10,15 +10,15 @@
 // this table — it is how incompatible peers discover the mismatch and tell
 // the user to upgrade, instead of dying in an opaque handshake failure.
 // Breaking changes to this file are forbidden, forever: append-only field
-// ids with no pre-1.0 exceptions. The QUIC ALPN ("Stromo/1") is frozen
+// ids with no pre-1.0 exceptions. The QUIC ALPN ("Stormo/1") is frozen
 // for the same reason — bumping it would fail the handshake before hello.
 //
 // Codegen (flatc version pinned in flake.nix, matched exactly by Package.swift):
-//   flatc --swift -o Sources/StromoProtocol/Generated Schemas/*.fbs
+//   flatc --swift -o Sources/StormoProtocol/Generated Schemas/*.fbs
 
 include "signal.fbs";
 
-namespace Stromo.Wire;
+namespace Stormo.Wire;
 
 table PeerHello {
   /// The sender's identity. key_hash must match the TLS certificate's key

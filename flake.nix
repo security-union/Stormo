@@ -1,5 +1,5 @@
 {
-  description = "Stromo — dev shell (auxiliary tooling; Swift toolchain comes from Xcode)";
+  description = "Stormo — dev shell (auxiliary tooling; Swift toolchain comes from Xcode)";
 
   inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
 
@@ -17,7 +17,7 @@
             # `google/flatbuffers` runtime pinned `exact:` in Package.swift — the
             # generated code and the runtime that reads it are one unit; bump both
             # together. Regenerate the committed sources with:
-            #   flatc --swift -o Sources/StromoProtocol/Generated Schemas/*.fbs
+            #   flatc --swift -o Sources/StormoProtocol/Generated Schemas/*.fbs
             pkgs.flatbuffers
           ];
         };

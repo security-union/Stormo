@@ -1,4 +1,4 @@
-// Stromo data-plane stream header (DD-7, incl. the message-channel
+// Stormo data-plane stream header (DD-7, incl. the message-channel
 // amendment).
 //
 // On the message channel (stream tag 0x02) every message is a size-prefixed
@@ -11,11 +11,11 @@
 // append-only enum values, verifier + caps on every inbound read.
 //
 // Codegen (flatc version pinned in flake.nix, matched exactly by Package.swift):
-//   flatc --swift -o Sources/StromoProtocol/Generated Schemas/*.fbs
+//   flatc --swift -o Sources/StormoProtocol/Generated Schemas/*.fbs
 
 include "common.fbs";
 
-namespace Stromo.Wire;
+namespace Stormo.Wire;
 
 enum StreamKind: ubyte {
   Unknown = 0,

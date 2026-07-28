@@ -1,5 +1,5 @@
 import Foundation
-import Stromo
+import Stormo
 
 /// Near-drop-in replacement for `MCNearbyServiceAdvertiser` (FR-24).
 ///
