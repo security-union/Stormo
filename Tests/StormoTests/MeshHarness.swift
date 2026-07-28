@@ -324,3 +324,14 @@ func meshDrained(_ sessions: [PeerSession], timeout: TimeInterval = 10) async ->
     }
     return true
 }
+
+// MARK: - Dedicated-stream counter serialization
+
+/// Umbrella for every suite that asserts on the process-global dedicated-
+/// stream counters (`QUICConnection.dedicatedOpened`/`.dedicatedRetired`).
+/// The churn suite's exact-delta expectations are only sound while no other
+/// suite opens oversized-payload streams, and `.serialized` applies
+/// recursively, so member suites never overlap. Any new suite that sends
+/// payloads above `channelMaxPayload` over real QUIC must live here.
+@Suite(.serialized)
+enum DedicatedStreamCounterSuites {}

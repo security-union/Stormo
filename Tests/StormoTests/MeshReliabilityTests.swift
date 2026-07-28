@@ -130,71 +130,74 @@ struct InMemoryMeshReliabilityTests {
 
 #if canImport(Network) && canImport(Security)
 
-/// Tier 2: the same contract over REAL loopback QUIC (Rendezvous discovery —
-/// no mDNS). What the in-memory tier is blind to lives here: the per-direction
-/// message channel vs dedicated-stream routing at `channelMaxPayload`
-/// (failure mode 13), the FIN two-step, and stream retirement. Serialized:
-/// binds real sockets and reads the global dedicated-stream counters.
-@Suite("Mesh reliability over loopback QUIC", .serialized)
-struct QUICMeshReliabilityTests {
+extension DedicatedStreamCounterSuites {
 
-    @Test("3-peer triangle: full size ladder across both stream paths")
-    func quicTriangle() async throws {
-        guard QUICTransport.isTLSIdentityAvailable(for: PeerIdentity(name: "probe")) else {
-            print("[skip] QUIC: no TLS identity in this environment")
-            return
+    /// Tier 2: the same contract over REAL loopback QUIC (Rendezvous discovery —
+    /// no mDNS). What the in-memory tier is blind to lives here: the per-direction
+    /// message channel vs dedicated-stream routing at `channelMaxPayload`
+    /// (failure mode 13), the FIN two-step, and stream retirement. Lives in the
+    /// umbrella: the ladder crosses `channelMaxPayload`, moving the global
+    /// dedicated-stream counters the churn suite asserts exact deltas on.
+    @Suite("Mesh reliability over loopback QUIC", .serialized)
+    struct QUICMeshReliabilityTests {
+
+        @Test("3-peer triangle: full size ladder across both stream paths")
+        func quicTriangle() async throws {
+            guard QUICTransport.isTLSIdentityAvailable(for: PeerIdentity(name: "probe")) else {
+                print("[skip] QUIC: no TLS identity in this environment")
+                return
+            }
+            let rendezvous = Rendezvous()
+            let sessions = (0 ..< 3).map { i in
+                PeerSession(
+                    identity: PeerIdentity(name: "peer-\(i)"),
+                    service: "_mesh._udp",
+                    transport: QUICTransport(configuration: .init(discovery: .rendezvous(rendezvous))))
+            }
+
+            let formation = try await formMesh(sessions)
+            print("MESH quic n=3 formed in \(String(format: "%.2f", formation))s")
+
+            // The ladder pinned to the transport's seams: channel rungs, the exact
+            // routing boundary (last-on-channel / first-dedicated), and a payload
+            // comfortably inside the dedicated-stream path. Cycling it makes
+            // consecutive seqs of ONE sender cross the boundary, so for
+            // `.reliableOrdered` a small channel message physically beats the big
+            // dedicated-stream message preceding it in sequence — the reorder
+            // buffer must hold and release (DD-7). Nothing else forces that.
+            let ladder = [
+                64, 1_200, 4_500,
+                QUICConnection.channelMaxPayload,
+                QUICConnection.channelMaxPayload + 1,
+                2 << 20,
+            ]
+            let messagesPerSender = 12  // two full ladder cycles per sender
+
+            for delivery in [Delivery.reliable, .reliableOrdered] {
+                let (inboxes, corrupt, metrics) = try await pump(
+                    sessions, delivery: delivery, messagesPerSender: messagesPerSender,
+                    size: { seq in ladder[seq % ladder.count] }, timeout: 120)
+                assertMeshDelivery(
+                    inboxes: inboxes, corrupt: corrupt, delivery: delivery,
+                    messagesPerSender: messagesPerSender, ordered: delivery == .reliableOrdered)
+                print("MESH quic n=3 \(delivery): \(metrics.summary)")
+            }
+
+            for session in sessions { await session.disconnect() }
+            #expect(await meshDrained(sessions), "membership did not drain after disconnect")
+
+            // No zombie dedicated streams (failure mode 13). Retirement is
+            // asynchronous, so assert eventual convergence, never deltas.
+            let deadline = Date().addingTimeInterval(30)
+            while QUICConnection.dedicatedOpened.value != QUICConnection.dedicatedRetired.value,
+                Date() < deadline
+            {
+                try await Task.sleep(nanoseconds: 100_000_000)
+            }
+            let opened = QUICConnection.dedicatedOpened.value
+            let retired = QUICConnection.dedicatedRetired.value
+            #expect(retired == opened, "zombie streams: \(opened - retired) opened, never retired")
         }
-        let rendezvous = Rendezvous()
-        let sessions = (0 ..< 3).map { i in
-            PeerSession(
-                identity: PeerIdentity(name: "peer-\(i)"),
-                service: "_mesh._udp",
-                transport: QUICTransport(configuration: .init(discovery: .rendezvous(rendezvous))))
-        }
-
-        let formation = try await formMesh(sessions)
-        print("MESH quic n=3 formed in \(String(format: "%.2f", formation))s")
-
-        // The ladder pinned to the transport's seams: channel rungs, the exact
-        // routing boundary (last-on-channel / first-dedicated), and a payload
-        // comfortably inside the dedicated-stream path. Cycling it makes
-        // consecutive seqs of ONE sender cross the boundary, so for
-        // `.reliableOrdered` a small channel message physically beats the big
-        // dedicated-stream message preceding it in sequence — the reorder
-        // buffer must hold and release (DD-7). Nothing else forces that.
-        let ladder = [
-            64, 1_200, 4_500,
-            QUICConnection.channelMaxPayload,
-            QUICConnection.channelMaxPayload + 1,
-            2 << 20,
-        ]
-        let messagesPerSender = 12  // two full ladder cycles per sender
-
-        for delivery in [Delivery.reliable, .reliableOrdered] {
-            let (inboxes, corrupt, metrics) = try await pump(
-                sessions, delivery: delivery, messagesPerSender: messagesPerSender,
-                size: { seq in ladder[seq % ladder.count] }, timeout: 120)
-            assertMeshDelivery(
-                inboxes: inboxes, corrupt: corrupt, delivery: delivery,
-                messagesPerSender: messagesPerSender, ordered: delivery == .reliableOrdered)
-            print("MESH quic n=3 \(delivery): \(metrics.summary)")
-        }
-
-        for session in sessions { await session.disconnect() }
-        #expect(await meshDrained(sessions), "membership did not drain after disconnect")
-
-        // No zombie dedicated streams (failure mode 13). Retirement is
-        // asynchronous and the churn suite moves the same global counters, so
-        // assert eventual convergence, never deltas.
-        let deadline = Date().addingTimeInterval(30)
-        while QUICConnection.dedicatedOpened.value != QUICConnection.dedicatedRetired.value,
-            Date() < deadline
-        {
-            try await Task.sleep(nanoseconds: 100_000_000)
-        }
-        let opened = QUICConnection.dedicatedOpened.value
-        let retired = QUICConnection.dedicatedRetired.value
-        #expect(retired == opened, "zombie streams: \(opened - retired) opened, never retired")
     }
 }
 

@@ -37,8 +37,10 @@ jobs:
         uses: actions/cache@v4
         with:
           path: .build
-          key: spm-${{ runner.os }}-${{ hashFiles('Package.swift') }}
-          restore-keys: spm-${{ runner.os }}-
+          # 'stormo' salt: pre-rename caches embed the old /PeerMesh/ workspace
+          # path in their PCHs; restoring one poisons every clang module build.
+          key: spm-stormo-${{ runner.os }}-${{ hashFiles('Package.swift') }}
+          restore-keys: spm-stormo-${{ runner.os }}-
       - name: Run tests with coverage
         run: swift test --enable-code-coverage
         env:
