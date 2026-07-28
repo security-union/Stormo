@@ -219,6 +219,20 @@ ProtocolEngine.handle(Input) -> [Effect]        // synchronous, deterministic
 | 2. Integration | Real QUIC (`NWConnection`+`NWProtocolQUIC`) over **loopback** between two endpoints in-process: handshake, streams, datagrams, TLS identity | Every commit, macOS CI runner | No radios, no devices |
 | 3. Hardware | AWDL/peer-to-peer Wi-Fi matrix: QA-1, QA-3, QA-4 measures; Spikes S-1/S-2/S-5 | Release gates + OS betas | Physical device lab |
 
+> **Mesh reliability — validated in CI (2026-07).** The QA-2/QA-8 mesh
+> targets are now asserted on every commit by
+> `Tests/PeerMeshTests/MeshReliabilityTests.swift`: a monotonic N = 3…32
+> full-mesh sweep over `InMemoryTransport` (formation convergence, exactly-once
+> delivery, payload integrity, sender attribution, per-sender ordering under a
+> reordering transport, clean drain) plus a 3-peer **real-QUIC loopback**
+> triangle whose size ladder crosses the message-channel ↔ dedicated-stream
+> boundary (DD-7 hardware amendment) and proves the open/retire ledger
+> balances. Measured: 32-peer sim ≈ 1.5 s (QA-8 budget 60 s); no reliability
+> violations at any N. Full write-up and result tables in the test file
+> header; the S-6 nightly benchmark remains the formal timing home. What this
+> does NOT cover: real radios/AWDL (tier 3) and relayed topologies (QA-2's
+> 128-peer target).
+
 **Platform execution matrix (tiers 1–2):** the same test bundles run on every shipping target — macOS native via `swift test` (fast loop + coverage), and per-destination via `xcodebuild test -scheme PeerMesh-Package` against **iOS Simulator** and **Mac Catalyst** (tvOS/visionOS simulators when installed). This is the pattern used by swift-nio, Apple's own packages, and the major Swift OSS projects: one suite, N destinations, no per-platform test code. Network.framework QUIC works over loopback in the iOS Simulator and Catalyst, so tier 2 runs on all of them without radios. Aspirational tier-1 extension (FoundationDB-style deterministic simulation testing): seeded random command/interleaving exploration against engine invariants — the seed arrives as engine input, so any nightly failure reproduces exactly from its seed.
 
 Module consequence: the engine, typed `Signal` model, and codec live in a dedicated **`PeerMeshProtocol`** target whose only dependency is FlatBuffers; `PeerMesh` (runtime shell + drivers) depends on it — **the shipped `PeerMesh` product includes the QUIC integration**; consumers get working transport out of the box, and the protocol target stays importable on its own for tests and tooling. Under the AI-driven development model (study §4.4) this is the highest-leverage structural decision in the project: it moves the majority of correctness into tier 1, which is agent-buildable and agent-testable with zero device time.
