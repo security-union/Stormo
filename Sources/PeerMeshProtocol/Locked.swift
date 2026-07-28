@@ -2,7 +2,7 @@ import Foundation
 
 /// A minimal mutex-guarded box for shared mutable state.
 ///
-/// This lives in the sans-I/O `PeerMeshProtocol` target (its only dependency is
+/// This lives in the sans-I/O `StromoProtocol` target (its only dependency is
 /// FlatBuffers, DD-6) purely so the runtime shell and its transports — which
 /// each need the same primitive — share one canonical implementation rather
 /// than re-declaring it per module. `NSLock` is a synchronization primitive, not

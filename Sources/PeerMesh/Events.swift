@@ -82,7 +82,7 @@ public struct Invitation: Sendable {
     /// `.automatic` trust; it is a distinct field because an app running
     /// `.pinned`/`.pairingCode` verifies against this authenticated value rather
     /// than the self-reported identity. Part of the public FR-22 surface even
-    /// though PeerMesh's own consumers (MPCCompat/UI) do not yet read it.
+    /// though Stromo's own consumers (MPCCompat/UI) do not yet read it.
     public let inviterKeyHash: Data
 
     public let accept: @Sendable () async -> Void

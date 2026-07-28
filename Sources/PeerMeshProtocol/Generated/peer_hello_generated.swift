@@ -4,7 +4,7 @@
 
 import FlatBuffers
 
-public struct PeerMesh_Wire_PeerHello: FlatBufferObject, Verifiable {
+public struct Stromo_Wire_PeerHello: FlatBufferObject, Verifiable {
 
   static func validateVersion() { FlatBuffersVersion_25_2_10() }
   public var __buffer: ByteBuffer! { return _accessor.bb }
@@ -24,7 +24,7 @@ public struct PeerMesh_Wire_PeerHello: FlatBufferObject, Verifiable {
 
   ///  The sender's identity. key_hash must match the TLS certificate's key
   ///  hash — divergence is identityMismatch and kills the connection.
-  public var peer: PeerMesh_Wire_PeerInfo? { let o = _accessor.offset(VTOFFSET.peer.v); return o == 0 ? nil : PeerMesh_Wire_PeerInfo(_accessor.bb, o: _accessor.indirect(o + _accessor.position)) }
+  public var peer: Stromo_Wire_PeerInfo? { let o = _accessor.offset(VTOFFSET.peer.v); return o == 0 ? nil : Stromo_Wire_PeerInfo(_accessor.bb, o: _accessor.indirect(o + _accessor.position)) }
   ///  Protocol semver: peers interoperate iff `major` matches. `minor` is
   ///  additive (append-only schema evolution; the newer side adapts to the
   ///  older); `patch` never changes the wire — diagnostics only.
@@ -44,17 +44,17 @@ public struct PeerMesh_Wire_PeerHello: FlatBufferObject, Verifiable {
     protocolMinor: UInt16 = 0,
     protocolPatch: UInt16 = 0
   ) -> Offset {
-    let __start = PeerMesh_Wire_PeerHello.startPeerHello(&fbb)
-    PeerMesh_Wire_PeerHello.add(peer: peer, &fbb)
-    PeerMesh_Wire_PeerHello.add(protocolMajor: protocolMajor, &fbb)
-    PeerMesh_Wire_PeerHello.add(protocolMinor: protocolMinor, &fbb)
-    PeerMesh_Wire_PeerHello.add(protocolPatch: protocolPatch, &fbb)
-    return PeerMesh_Wire_PeerHello.endPeerHello(&fbb, start: __start)
+    let __start = Stromo_Wire_PeerHello.startPeerHello(&fbb)
+    Stromo_Wire_PeerHello.add(peer: peer, &fbb)
+    Stromo_Wire_PeerHello.add(protocolMajor: protocolMajor, &fbb)
+    Stromo_Wire_PeerHello.add(protocolMinor: protocolMinor, &fbb)
+    Stromo_Wire_PeerHello.add(protocolPatch: protocolPatch, &fbb)
+    return Stromo_Wire_PeerHello.endPeerHello(&fbb, start: __start)
   }
 
   public static func verify<T>(_ verifier: inout Verifier, at position: Int, of type: T.Type) throws where T: Verifiable {
     var _v = try verifier.visitTable(at: position)
-    try _v.visit(field: VTOFFSET.peer.p, fieldName: "peer", required: false, type: ForwardOffset<PeerMesh_Wire_PeerInfo>.self)
+    try _v.visit(field: VTOFFSET.peer.p, fieldName: "peer", required: false, type: ForwardOffset<Stromo_Wire_PeerInfo>.self)
     try _v.visit(field: VTOFFSET.protocolMajor.p, fieldName: "protocolMajor", required: false, type: UInt16.self)
     try _v.visit(field: VTOFFSET.protocolMinor.p, fieldName: "protocolMinor", required: false, type: UInt16.self)
     try _v.visit(field: VTOFFSET.protocolPatch.p, fieldName: "protocolPatch", required: false, type: UInt16.self)

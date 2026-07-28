@@ -1,4 +1,4 @@
-/// PeerMesh wire-protocol version, negotiated once per connection via the
+/// Stromo wire-protocol version, negotiated once per connection via the
 /// `PeerHello` bootstrap (peer_hello.fbs) — never per-signal.
 ///
 /// Semver interop rule: peers talk iff `major` matches. `minor` is additive

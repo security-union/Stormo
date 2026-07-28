@@ -1,27 +1,27 @@
 import Foundation
-import PeerMesh
+import Stromo
 
 /// Diagnostic CLI: exercises the production discovery + transport path
 /// (Bonjour + QUIC) between real processes. The debugging ladder for
 /// "devices can't see each other": two processes on one Mac → two Macs on a
 /// LAN → two iPhones (implementation plan Step 5).
 ///
-///     peermesh advertise [--service _pmdemo._udp] [--name A] [--meta k=v]...
-///     peermesh browse    [--service _pmdemo._udp] [--timeout 30]
-///     peermesh host      [--service ...] [--name A] [--once]
-///     peermesh join      [--service ...] [--name B] [--peer A] [--send ping] [--linger]
+///     Stromo advertise [--service _pmdemo._udp] [--name A] [--meta k=v]...
+///     Stromo browse    [--service _pmdemo._udp] [--timeout 30]
+///     Stromo host      [--service ...] [--name A] [--once]
+///     Stromo join      [--service ...] [--name B] [--peer A] [--send ping] [--linger]
 ///
 /// `host` advertises, auto-accepts invitations, echoes every message back
 /// ("pong: <text>"). `join` browses, invites the first (or --peer named) peer,
 /// sends --send, waits for the echo, prints SUCCESS, exits 0. Both exit 2 on
 /// --timeout (default 30 s). Set QUIC_DEBUG=1 for driver logs.
 @main
-struct PeerMeshCLI {
+struct StromoCLI {
 
     static func main() async {
         var arguments = Array(CommandLine.arguments.dropFirst())
         guard let command = arguments.first, ["advertise", "browse", "host", "join"].contains(command) else {
-            print("usage: peermesh advertise|browse|host|join [--service TYPE] [--name NAME] [--peer NAME] [--send TEXT] [--meta k=v] [--timeout SECS] [--once]")
+            print("usage: Stromo advertise|browse|host|join [--service TYPE] [--name NAME] [--peer NAME] [--send TEXT] [--meta k=v] [--timeout SECS] [--once]")
             exit(64)
         }
         arguments.removeFirst()
@@ -51,7 +51,7 @@ struct PeerMeshCLI {
         let name = options["name"] ?? "\(ProcessInfo.processInfo.hostName)-\(getpid())"
         let timeout = TimeInterval(options["timeout"] ?? "30") ?? 30
 
-        log("peermesh \(command) — name=\(name) service=\(service) pid=\(getpid())")
+        log("Stromo \(command) — name=\(name) service=\(service) pid=\(getpid())")
 
         // Global watchdog: a diagnostic tool must never hang silently.
         Task {
@@ -146,7 +146,7 @@ struct PeerMeshCLI {
 
                 log("inviting \(target.id.displayName)…")
                 let member = try await session.invite(
-                    target, context: Data("peermesh-cli".utf8), timeout: min(timeout, 15))
+                    target, context: Data("Stromo-cli".utf8), timeout: min(timeout, 15))
                 log("JOINED session with \(member.id.displayName)")
 
                 let text = options["send"] ?? "ping"

@@ -1,9 +1,9 @@
 import Foundation
 import Testing
 
-import PeerMeshTestKit
+import StromoTestKit
 
-@testable import PeerMesh
+@testable import Stromo
 
 // =============================================================================
 // N-peer mesh reliability (QA-2 / QA-8) — what these suites prove and how

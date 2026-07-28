@@ -52,5 +52,5 @@ public enum SessionTopology: Sendable {
     public static let `default`: SessionTopology = .fullMesh(maxPeers: 32)
 }
 
-// Delivery, Recipients, PeerMeshError, Signal, and ProtocolEngine live in the
-// sans-I/O PeerMeshProtocol target (DD-6) and are re-exported by this module.
+// Delivery, Recipients, StromoError, Signal, and ProtocolEngine live in the
+// sans-I/O StromoProtocol target (DD-6) and are re-exported by this module.

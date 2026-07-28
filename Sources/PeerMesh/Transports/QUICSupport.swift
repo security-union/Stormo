@@ -1,6 +1,6 @@
 import Foundation
 import FlatBuffers
-import PeerMeshProtocol
+import StromoProtocol
 
 #if canImport(Network)
 import Network
@@ -39,20 +39,20 @@ enum QUICError: Error, Sendable, LocalizedError {
     // LocalizedError puts the actual reason in localizedDescription.
     var errorDescription: String? {
         switch self {
-        case .connectionClosed: return "PeerMesh QUIC: connection closed"
-        case .shortRead: return "PeerMesh QUIC: stream ended mid-frame"
-        case .identityMismatch: return "PeerMesh QUIC: peer key hash does not match its certificate"
+        case .connectionClosed: return "Stromo QUIC: connection closed"
+        case .shortRead: return "Stromo QUIC: stream ended mid-frame"
+        case .identityMismatch: return "Stromo QUIC: peer key hash does not match its certificate"
         case .tlsIdentityUnavailable(let reason):
-            return "PeerMesh QUIC: no local TLS identity — \(reason)"
-        case .malformedStreamHeader: return "PeerMesh QUIC: malformed stream header"
-        case .listenerFailed(let reason): return "PeerMesh QUIC: listener failed — \(reason)"
+            return "Stromo QUIC: no local TLS identity — \(reason)"
+        case .malformedStreamHeader: return "Stromo QUIC: malformed stream header"
+        case .listenerFailed(let reason): return "Stromo QUIC: listener failed — \(reason)"
         case .serviceResolutionFailed:
-            return "PeerMesh QUIC: Bonjour service endpoint did not resolve"
+            return "Stromo QUIC: Bonjour service endpoint did not resolve"
         case .protocolVersionMismatch(let local, let remote):
             let hint = remote.major > local.major
                 ? "this device needs an app upgrade"
                 : "the peer needs an app upgrade"
-            return "PeerMesh QUIC: protocol version mismatch — local \(local), peer \(remote); \(hint)"
+            return "Stromo QUIC: protocol version mismatch — local \(local), peer \(remote); \(hint)"
         }
     }
 }
@@ -366,7 +366,7 @@ enum PeerHello {
         let name = fbb.create(string: peer.displayName)
         let info = WirePeerInfo.createPeerInfo(
             &fbb, keyHashVectorOffset: keyHash, displayNameOffset: name)
-        let root = PeerMesh_Wire_PeerHello.createPeerHello(
+        let root = Stromo_Wire_PeerHello.createPeerHello(
             &fbb,
             peerOffset: info,
             protocolMajor: version.major,
@@ -379,7 +379,7 @@ enum PeerHello {
     static func decode(_ data: Data) -> Decoded? {
         var buffer = ByteBuffer(data: data)
         guard
-            let root: PeerMesh_Wire_PeerHello = try? getCheckedRoot(
+            let root: Stromo_Wire_PeerHello = try? getCheckedRoot(
                 byteBuffer: &buffer,
                 options: VerifierOptions(maxDepth: 16, maxTableCount: 64, maxApparentSize: 1 << 16))
         else { return nil }
@@ -415,7 +415,7 @@ enum QUICStreamHeaderCodec {
     static func encode(_ info: StreamHeaderInfo) -> Data {
         var fbb = FlatBufferBuilder(initialSize: 128)
         let labelOffset = info.label.map { fbb.create(string: $0) } ?? Offset()
-        let root = PeerMesh_Wire_StreamHeader.createStreamHeader(
+        let root = Stromo_Wire_StreamHeader.createStreamHeader(
             &fbb,
             kind: wireKind(info.kind),
             sequence: info.sequence ?? 0,
@@ -427,7 +427,7 @@ enum QUICStreamHeaderCodec {
 
     static func decode(_ data: Data) throws -> StreamHeaderInfo {
         var buffer = ByteBuffer(data: data)
-        let root: PeerMesh_Wire_StreamHeader
+        let root: Stromo_Wire_StreamHeader
         do {
             root = try getCheckedRoot(
                 byteBuffer: &buffer,
@@ -442,7 +442,7 @@ enum QUICStreamHeaderCodec {
             transferID: root.transferId?.uuidValue, label: root.label)
     }
 
-    private static func wireKind(_ kind: StreamHeaderInfo.Kind) -> PeerMesh_Wire_StreamKind {
+    private static func wireKind(_ kind: StreamHeaderInfo.Kind) -> Stromo_Wire_StreamKind {
         switch kind {
         case .message: return .message
         case .orderedMessage: return .orderedmessage
@@ -452,7 +452,7 @@ enum QUICStreamHeaderCodec {
         }
     }
 
-    private static func infoKind(_ kind: PeerMesh_Wire_StreamKind) -> StreamHeaderInfo.Kind {
+    private static func infoKind(_ kind: Stromo_Wire_StreamKind) -> StreamHeaderInfo.Kind {
         switch kind {
         case .message, .unknown: return .message
         case .orderedmessage: return .orderedMessage

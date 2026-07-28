@@ -1,6 +1,6 @@
 import CryptoKit
 import Foundation
-import PeerMeshProtocol
+import StromoProtocol
 
 #if canImport(Network)
 import Network
@@ -60,7 +60,7 @@ enum QUICTLS {
     /// FROZEN. Version gating is the PeerHello semver (same-major interop) —
     /// bumping the ALPN would fail the handshake before hello, turning a
     /// diagnosable "upgrade required" into an opaque connect failure.
-    static let alpn = "peermesh/1"
+    static let alpn = "Stromo/1"
 
     /// Forms the local `sec_identity_t`.
     ///
@@ -106,7 +106,7 @@ enum QUICTLS {
     #if os(macOS)
     private static func createFileKeychain() throws -> (SecKeychain, URL) {
         let dir = FileManager.default.temporaryDirectory
-            .appendingPathComponent("peermesh-kc-\(UUID().uuidString)", isDirectory: true)
+            .appendingPathComponent("Stromo-kc-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         let url = dir.appendingPathComponent("id.keychain")
         let pass = UUID().uuidString
@@ -188,7 +188,7 @@ enum QUICTLS {
     }
     #endif
 
-    /// Builds `NWParameters` for a QUIC endpoint: ALPN `peermesh/1`, local
+    /// Builds `NWParameters` for a QUIC endpoint: ALPN `Stromo/1`, local
     /// identity, mutual authentication (so both ends recover the peer's
     /// authenticated key hash — FR-22), a ``TrustPolicy`` verify block, and
     /// generous stream/flow limits for the stream-per-message data plane (DD-7,
@@ -235,7 +235,7 @@ enum QUICTLS {
     /// apply the policy. `displayName`/key-hash bookkeeping happens later from the
     /// connection's authenticated metadata.
     private static func installVerifyBlock(_ sec: sec_protocol_options_t, trust: TrustPolicy) {
-        let queue = DispatchQueue(label: "dev.securityunion.peermesh.quic.verify")
+        let queue = DispatchQueue(label: "dev.securityunion.Stromo.quic.verify")
         sec_protocol_options_set_verify_block(sec, { _, secTrust, complete in
             quicDebug("verify block called")
             let trustRef = sec_trust_copy_ref(secTrust).takeRetainedValue()

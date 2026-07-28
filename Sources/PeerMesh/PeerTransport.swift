@@ -6,7 +6,7 @@ import Foundation
 /// connections, and report lifecycle. Implementations: `QUICTransport`
 /// (primary, DD-1), `TCPTLSTransport` (contingency, pending Spike S-1),
 /// `WiFiAwareTransport` (post-1.0), and `InMemoryTransport` in
-/// PeerMeshTestKit (QA-8).
+/// StromoTestKit (QA-8).
 public protocol PeerTransport: Sendable {
     /// Advertise the service with metadata (Bonjour TXT record) on all
     /// eligible paths, including peer-to-peer Wi-Fi (FR-1, FR-3).

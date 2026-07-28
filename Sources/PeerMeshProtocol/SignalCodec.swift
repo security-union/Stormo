@@ -27,7 +27,7 @@ public enum SignalCodec {
     /// genuine structural malformation throws, and that is connection-fatal.
     public static func decode(_ data: Data) throws -> Signal {
         guard data.count <= maxControlMessageSize, !data.isEmpty else {
-            throw PeerMeshError.malformedSignal
+            throw StromoError.malformedSignal
         }
         var buffer = ByteBuffer(data: data)
         do {
@@ -39,7 +39,7 @@ public enum SignalCodec {
                     maxApparentSize: UInt32(maxControlMessageSize)))
             return Signal(verified: data, root: root)
         } catch {
-            throw PeerMeshError.malformedSignal
+            throw StromoError.malformedSignal
         }
     }
 }

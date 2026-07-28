@@ -1,6 +1,6 @@
-# CLAUDE.md — PeerMesh contributor guide (AI & human)
+# CLAUDE.md — Stromo contributor guide (AI & human)
 
-PeerMesh is an open-source replacement for Apple's deprecated
+Stromo is an open-source replacement for Apple's deprecated
 MultipeerConnectivity, built on Network.framework + QUIC. The codebase is
 split by the sans-I/O discipline (DD-6): a pure, deterministic protocol engine
 that decides, and thin async drivers that move bytes. Read
@@ -12,29 +12,29 @@ the hard-won platform-findings log and the source of the failure modes below.
 
 | Module | Kind | What lives here |
 |---|---|---|
-| **PeerMeshProtocol** | library (sans-I/O) | `ProtocolEngine` state machine, `Signal` model + `SignalCodec` (FlatBuffers verifier), `PeerID`/`LibP2PIdentity`, `Delivery`/`Recipients`/`PeerMeshError`, `Locked`. Only dependency: FlatBuffers. |
-| **PeerMesh** | library (runtime) | `PeerSession` actor (effect executor), `QUICTransport` + QUIC driver, Security (identity, certificate, keychain stores, `TrustEvaluator`), public event/config types. Re-exports PeerMeshProtocol so apps write only `import PeerMesh`. |
+| **StromoProtocol** | library (sans-I/O) | `ProtocolEngine` state machine, `Signal` model + `SignalCodec` (FlatBuffers verifier), `PeerID`/`LibP2PIdentity`, `Delivery`/`Recipients`/`StromoError`, `Locked`. Only dependency: FlatBuffers. |
+| **Stromo** | library (runtime) | `PeerSession` actor (effect executor), `QUICTransport` + QUIC driver, Security (identity, certificate, keychain stores, `TrustEvaluator`), public event/config types. Re-exports StromoProtocol so apps write only `import Stromo`. |
 | **MPCCompat** | library | Near-drop-in `MCSession`/`MCPeerID`/advertiser/browser analogs over `PeerSession` (FR-24). |
-| **PeerMeshUI** | library | SwiftUI peer picker + invitation consent (FR-23). **Experimental preview, API unstable.** |
-| **PeerMeshTestKit** | library | `InMemoryTransport` (+ mesh sim) and `ReorderingTransport` — CI without radios (QA-8). |
-| **PeerMeshCLI** (`peermesh-cli`) | executable | Diagnostic advertise/browse/host/join over real Bonjour+QUIC between processes. |
+| **StromoUI** | library | SwiftUI peer picker + invitation consent (FR-23). **Experimental preview, API unstable.** |
+| **StromoTestKit** | library | `InMemoryTransport` (+ mesh sim) and `ReorderingTransport` — CI without radios (QA-8). |
+| **StromoCLI** (`Stromo-cli`) | executable | Diagnostic advertise/browse/host/join over real Bonjour+QUIC between processes. |
 
 ## Build & test
 
 - `swift test` — tiers 1 & 2 (engine + loopback QUIC), fast macOS loop. 54 tests today.
 - `./Scripts/e2e-cli.sh` — cross-process Bonjour+QUIC exchange (host + joiner as separate processes). Caught the FIN and inbound-retention bugs.
-- `xcodebuild test -scheme PeerMesh-Package -destination '<dest>'` for other Apple targets (same suite, N destinations):
+- `xcodebuild test -scheme Stromo-Package -destination '<dest>'` for other Apple targets (same suite, N destinations):
   - iOS simulator: `-destination 'platform=iOS Simulator,id=<UDID>'` (resolve a UDID via `xcrun simctl list devices available`).
   - Mac Catalyst: `-destination 'platform=macOS,variant=Mac Catalyst'`.
 
 ### Environment flags
 - `QUIC_DEBUG=1` — enable the QUIC driver's diagnostic log to stdout.
 - `QUIC_DEBUG_LOG=<path>` — also append that log to a file (survives sandboxing).
-- `PEERMESH_NO_P2P=1` — disable `includePeerToPeer`. Required for **in-process** entitled E2E tests: `includePeerToPeer` breaks same-machine self-dials (failure mode 10). Never set it for real cross-device runs.
+- `Stromo_NO_P2P=1` — disable `includePeerToPeer`. Required for **in-process** entitled E2E tests: `includePeerToPeer` breaks same-machine self-dials (failure mode 10). Never set it for real cross-device runs.
 
 ### FlatBuffers regeneration (DD-5 rule 4)
 ```
-flatc --swift -o Sources/PeerMeshProtocol/Generated Schemas/*.fbs
+flatc --swift -o Sources/StromoProtocol/Generated Schemas/*.fbs
 ```
 Generated sources are committed and CI fails on drift. **Exact-version pin
 rule:** the `flatc` in `flake.nix` MUST equal the `google/flatbuffers` runtime
@@ -43,18 +43,18 @@ the runtime that reads it are one unit. Bump both together.
 
 ## Hard architectural rules
 
-- **PeerMeshProtocol stays sans-I/O.** No sockets, no clocks, no async, no
+- **StromoProtocol stays sans-I/O.** No sockets, no clocks, no async, no
   Foundation I/O. Its only dependency is FlatBuffers. Time enters the engine as
   an `Input`, never from a clock. (`Locked`/`NSLock` is a synchronization
   primitive, not I/O, and is allowed.)
-- **Engine changes land with tier-1 tests first** (`Tests/PeerMeshProtocolTests`).
+- **Engine changes land with tier-1 tests first** (`Tests/StromoProtocolTests`).
   The engine is `handle(Input) -> [Effect]`, pure and deterministic — assert on
   the effect list.
 - **FlatBuffers schema evolution:** field ids are append-only; never renumber,
   retype, or remove (only `(deprecated)`); no new `(required)` after 1.0;
   enum/union values append-only with `UNKNOWN = 0`. Every inbound buffer goes
   through the verifier (`getCheckedRoot`, hard caps). Generated code is
-  committed. Do NOT hand-edit `Schemas/` or `Sources/PeerMeshProtocol/Generated/`.
+  committed. Do NOT hand-edit `Schemas/` or `Sources/StromoProtocol/Generated/`.
 - **Platform floor: iOS 15 / macOS 12** (QUIC floor). No `Duration` (use
   `TimeInterval`). RFC 9221 datagrams are iOS 16/macOS 13, below the floor — see
   failure mode 1 and the `StreamKind.Datagram` channel mapping.
@@ -106,7 +106,7 @@ code that guards them without understanding why it exists.
    interface assertion MUST be validated in the mesh-hardware spike before
    radio release.
 10. **`includePeerToPeer` breaks same-machine self-dials.** Use
-    `PEERMESH_NO_P2P=1` for in-process tests; CI sets it for every
+    `Stromo_NO_P2P=1` for in-process tests; CI sets it for every
     same-machine job. Note `ProcessInfo.environment` caches at first access;
     the driver reads this flag via `getenv` so a test's `setenv` actually
     lands.
@@ -153,7 +153,7 @@ In-code TODOs reference these by name: `// TODO(ledger-name): one line`.
 - **churn-benchmark** — S-6 formal stream-churn benchmark (nightly CI stub in `ci.yml`).
 - **pairing-code** — `.pairingCode` transcript binding (S-4, DD-2).
 - **compat-nsstream-bridge** — `MPCCompat.startStream` `NSStream` bridge over `PeerByteStream`.
-- **ui-completion** — PeerMeshUI beyond the current skeleton.
+- **ui-completion** — StromoUI beyond the current skeleton.
 - **mesh-join** — join via endpoint exchange for gossiped roster members (roster names peers we haven't discovered).
 - **send-ack** — send-acknowledgement API (`PeerSession.send` returns before transport handoff).
 - **mesh-hardware** — S-2 mesh-ceiling and S-5 backgrounding hardware spikes.

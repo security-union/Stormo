@@ -1,5 +1,5 @@
 import Foundation
-import PeerMesh
+import Stromo
 
 /// Near-drop-in replacement for `MCNearbyServiceAdvertiser` (FR-24).
 ///

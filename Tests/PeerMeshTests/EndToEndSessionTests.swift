@@ -2,8 +2,8 @@ import CryptoKit
 import Foundation
 import Testing
 
-import PeerMesh
-import PeerMeshTestKit
+import Stromo
+import StromoTestKit
 
 /// Tier-1.5 tests: the COMPLETE runtime — PeerSession effect executor, engine,
 /// codec, timers — over the in-memory transport. Real wire bytes (FlatBuffers
@@ -103,7 +103,7 @@ struct EndToEndSessionTests {
             }
         }
 
-        await #expect(throws: PeerMeshError.invitationDeclined) {
+        await #expect(throws: StromoError.invitationDeclined) {
             try await monitor.invite(try #require(discovered))
         }
         await declineTask.value
@@ -129,7 +129,7 @@ struct EndToEndSessionTests {
             }
         }
 
-        await #expect(throws: PeerMeshError.invitationTimedOut) {
+        await #expect(throws: StromoError.invitationTimedOut) {
             try await monitor.invite(try #require(discovered), timeout: 0.2)
         }
 
@@ -147,7 +147,7 @@ struct EndToEndSessionTests {
             transport: InMemoryTransport(hub: hub))
 
         let oversized = Data(repeating: 0xD8, count: Delivery.maxDatagramPayload + 1)
-        await #expect(throws: PeerMeshError.datagramTooLarge(
+        await #expect(throws: StromoError.datagramTooLarge(
             bytes: Delivery.maxDatagramPayload + 1, limit: Delivery.maxDatagramPayload)
         ) {
             try await session.send(oversized, delivery: .datagram)
@@ -155,7 +155,7 @@ struct EndToEndSessionTests {
 
         // Exactly at the cap: passes the size guard (then fails on membership,
         // proving the guard, not the payload, was the gate above).
-        await #expect(throws: PeerMeshError.peerUnreachable(identity.id)) {
+        await #expect(throws: StromoError.peerUnreachable(identity.id)) {
             try await session.send(
                 Data(repeating: 0xD8, count: Delivery.maxDatagramPayload), delivery: .datagram)
         }
@@ -169,7 +169,7 @@ struct EndToEndSessionTests {
             identity: PeerIdentity(name: "Lonely"),
             service: "_e2e._udp",
             transport: InMemoryTransport(hub: hub))
-        await #expect(throws: PeerMeshError.self) {
+        await #expect(throws: StromoError.self) {
             try await session.send(Data([1]))
         }
         await session.disconnect()
@@ -396,7 +396,7 @@ struct EndToEndSessionTests {
         var data = Data(capacity: bytes)
         while data.count < bytes { data.append(block) }
         let url = FileManager.default.temporaryDirectory
-            .appendingPathComponent("peermesh-src-\(UUID().uuidString).bin")
+            .appendingPathComponent("Stromo-src-\(UUID().uuidString).bin")
         try data.prefix(bytes).write(to: url)
         return url
     }

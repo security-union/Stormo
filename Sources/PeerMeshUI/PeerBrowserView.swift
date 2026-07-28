@@ -1,10 +1,10 @@
 #if canImport(SwiftUI)
-import PeerMesh
+import Stromo
 import SwiftUI
 
 /// SwiftUI replacement for `MCBrowserViewController` (FR-23): lists discovered
 /// peers and lets the user invite them. Fully restyleable; built solely on
-/// public PeerMesh APIs.
+/// public Stromo APIs.
 ///
 /// - Warning: Experimental preview — the API is unstable and this view is a
 ///   minimal skeleton. TODO(ui-completion): invite action with progress/error

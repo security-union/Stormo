@@ -1,9 +1,9 @@
 import Foundation
 import Testing
 
-import PeerMeshTestKit
+import StromoTestKit
 
-@testable import PeerMesh
+@testable import Stromo
 
 // =============================================================================
 // Disconnection detection (FR-14 bound) — the three departure shapes

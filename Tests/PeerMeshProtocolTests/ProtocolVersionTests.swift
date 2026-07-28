@@ -1,6 +1,6 @@
 import Testing
 
-@testable import PeerMeshProtocol
+@testable import StromoProtocol
 
 @Suite("ProtocolVersion — semver interop rule")
 struct ProtocolVersionTests {

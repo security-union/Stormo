@@ -4,7 +4,7 @@
 
 import FlatBuffers
 
-public enum PeerMesh_Wire_StreamKind: UInt8, Enum, Verifiable {
+public enum Stromo_Wire_StreamKind: UInt8, Enum, Verifiable {
   public typealias T = UInt8
   public static var byteSize: Int { return MemoryLayout<UInt8>.size }
   public var value: UInt8 { return self.rawValue }
@@ -23,12 +23,12 @@ public enum PeerMesh_Wire_StreamKind: UInt8, Enum, Verifiable {
   ///  (iOS 16+/macOS 13+) are the latency refinement (TODO datagrams).
   case datagram = 5
 
-  public static var max: PeerMesh_Wire_StreamKind { return .datagram }
-  public static var min: PeerMesh_Wire_StreamKind { return .unknown }
+  public static var max: Stromo_Wire_StreamKind { return .datagram }
+  public static var min: Stromo_Wire_StreamKind { return .unknown }
 }
 
 
-public struct PeerMesh_Wire_StreamHeader: FlatBufferObject, Verifiable {
+public struct Stromo_Wire_StreamHeader: FlatBufferObject, Verifiable {
 
   static func validateVersion() { FlatBuffersVersion_25_2_10() }
   public var __buffer: ByteBuffer! { return _accessor.bb }
@@ -46,41 +46,41 @@ public struct PeerMesh_Wire_StreamHeader: FlatBufferObject, Verifiable {
     var p: VOffset { self.rawValue }
   }
 
-  public var kind: PeerMesh_Wire_StreamKind { let o = _accessor.offset(VTOFFSET.kind.v); return o == 0 ? .unknown : PeerMesh_Wire_StreamKind(rawValue: _accessor.readBuffer(of: UInt8.self, at: o)) ?? .unknown }
+  public var kind: Stromo_Wire_StreamKind { let o = _accessor.offset(VTOFFSET.kind.v); return o == 0 ? .unknown : Stromo_Wire_StreamKind(rawValue: _accessor.readBuffer(of: UInt8.self, at: o)) ?? .unknown }
   ///  Sender-local FIFO sequence, per peer pair. Meaningful for OrderedMessage.
   public var sequence: UInt64 { let o = _accessor.offset(VTOFFSET.sequence.v); return o == 0 ? 0 : _accessor.readBuffer(of: UInt64.self, at: o) }
   ///  Meaningful for TransferChunk.
-  public var transferId: PeerMesh_Wire_TransferId? { let o = _accessor.offset(VTOFFSET.transferId.v); return o == 0 ? nil : _accessor.readBuffer(of: PeerMesh_Wire_TransferId.self, at: o) }
-  public var mutableTransferId: PeerMesh_Wire_TransferId_Mutable? { let o = _accessor.offset(VTOFFSET.transferId.v); return o == 0 ? nil : PeerMesh_Wire_TransferId_Mutable(_accessor.bb, o: o + _accessor.position) }
+  public var transferId: Stromo_Wire_TransferId? { let o = _accessor.offset(VTOFFSET.transferId.v); return o == 0 ? nil : _accessor.readBuffer(of: Stromo_Wire_TransferId.self, at: o) }
+  public var mutableTransferId: Stromo_Wire_TransferId_Mutable? { let o = _accessor.offset(VTOFFSET.transferId.v); return o == 0 ? nil : Stromo_Wire_TransferId_Mutable(_accessor.bb, o: o + _accessor.position) }
   ///  The app-chosen stream name. Meaningful for AppStream.
   public var label: String? { let o = _accessor.offset(VTOFFSET.label.v); return o == 0 ? nil : _accessor.string(at: o) }
   public var labelSegmentArray: [UInt8]? { return _accessor.getVector(at: VTOFFSET.label.v) }
   public static func startStreamHeader(_ fbb: inout FlatBufferBuilder) -> UOffset { fbb.startTable(with: 4) }
-  public static func add(kind: PeerMesh_Wire_StreamKind, _ fbb: inout FlatBufferBuilder) { fbb.add(element: kind.rawValue, def: 0, at: VTOFFSET.kind.p) }
+  public static func add(kind: Stromo_Wire_StreamKind, _ fbb: inout FlatBufferBuilder) { fbb.add(element: kind.rawValue, def: 0, at: VTOFFSET.kind.p) }
   public static func add(sequence: UInt64, _ fbb: inout FlatBufferBuilder) { fbb.add(element: sequence, def: 0, at: VTOFFSET.sequence.p) }
-  public static func add(transferId: PeerMesh_Wire_TransferId?, _ fbb: inout FlatBufferBuilder) { guard let transferId = transferId else { return }; fbb.create(struct: transferId, position: VTOFFSET.transferId.p) }
+  public static func add(transferId: Stromo_Wire_TransferId?, _ fbb: inout FlatBufferBuilder) { guard let transferId = transferId else { return }; fbb.create(struct: transferId, position: VTOFFSET.transferId.p) }
   public static func add(label: Offset, _ fbb: inout FlatBufferBuilder) { fbb.add(offset: label, at: VTOFFSET.label.p) }
   public static func endStreamHeader(_ fbb: inout FlatBufferBuilder, start: UOffset) -> Offset { let end = Offset(offset: fbb.endTable(at: start)); return end }
   public static func createStreamHeader(
     _ fbb: inout FlatBufferBuilder,
-    kind: PeerMesh_Wire_StreamKind = .unknown,
+    kind: Stromo_Wire_StreamKind = .unknown,
     sequence: UInt64 = 0,
-    transferId: PeerMesh_Wire_TransferId? = nil,
+    transferId: Stromo_Wire_TransferId? = nil,
     labelOffset label: Offset = Offset()
   ) -> Offset {
-    let __start = PeerMesh_Wire_StreamHeader.startStreamHeader(&fbb)
-    PeerMesh_Wire_StreamHeader.add(kind: kind, &fbb)
-    PeerMesh_Wire_StreamHeader.add(sequence: sequence, &fbb)
-    PeerMesh_Wire_StreamHeader.add(transferId: transferId, &fbb)
-    PeerMesh_Wire_StreamHeader.add(label: label, &fbb)
-    return PeerMesh_Wire_StreamHeader.endStreamHeader(&fbb, start: __start)
+    let __start = Stromo_Wire_StreamHeader.startStreamHeader(&fbb)
+    Stromo_Wire_StreamHeader.add(kind: kind, &fbb)
+    Stromo_Wire_StreamHeader.add(sequence: sequence, &fbb)
+    Stromo_Wire_StreamHeader.add(transferId: transferId, &fbb)
+    Stromo_Wire_StreamHeader.add(label: label, &fbb)
+    return Stromo_Wire_StreamHeader.endStreamHeader(&fbb, start: __start)
   }
 
   public static func verify<T>(_ verifier: inout Verifier, at position: Int, of type: T.Type) throws where T: Verifiable {
     var _v = try verifier.visitTable(at: position)
-    try _v.visit(field: VTOFFSET.kind.p, fieldName: "kind", required: false, type: PeerMesh_Wire_StreamKind.self)
+    try _v.visit(field: VTOFFSET.kind.p, fieldName: "kind", required: false, type: Stromo_Wire_StreamKind.self)
     try _v.visit(field: VTOFFSET.sequence.p, fieldName: "sequence", required: false, type: UInt64.self)
-    try _v.visit(field: VTOFFSET.transferId.p, fieldName: "transferId", required: false, type: PeerMesh_Wire_TransferId.self)
+    try _v.visit(field: VTOFFSET.transferId.p, fieldName: "transferId", required: false, type: Stromo_Wire_TransferId.self)
     try _v.visit(field: VTOFFSET.label.p, fieldName: "label", required: false, type: ForwardOffset<String>.self)
     _v.finish()
   }

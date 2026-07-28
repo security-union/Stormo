@@ -1,5 +1,5 @@
 import Foundation
-import PeerMeshProtocol
+import StromoProtocol
 
 #if canImport(Network)
 import Network

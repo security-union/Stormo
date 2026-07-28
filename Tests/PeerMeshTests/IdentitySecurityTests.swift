@@ -2,7 +2,7 @@ import CryptoKit
 import Foundation
 import Testing
 
-@testable import PeerMesh
+@testable import Stromo
 
 #if canImport(Security)
 import Security
@@ -200,7 +200,7 @@ struct IdentitySecurityTests {
 
     private static func tempDir() -> URL {
         let base = FileManager.default.temporaryDirectory
-            .appendingPathComponent("peermesh-tests-\(UUID().uuidString)")
+            .appendingPathComponent("Stromo-tests-\(UUID().uuidString)")
         try? FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
         return base
     }

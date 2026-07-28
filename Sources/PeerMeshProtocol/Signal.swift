@@ -1,17 +1,17 @@
 import FlatBuffers
 import Foundation
 
-// Ergonomic aliases for the flatc-generated types (namespace PeerMesh.Wire).
-public typealias WireSignal = PeerMesh_Wire_Signal
-public typealias WireSignalBody = PeerMesh_Wire_SignalBody
-public typealias WirePeerInfo = PeerMesh_Wire_PeerInfo
-public typealias WireInvite = PeerMesh_Wire_Invite
-public typealias WireInviteResponse = PeerMesh_Wire_InviteResponse
-public typealias WireCodeConfirm = PeerMesh_Wire_CodeConfirm
-public typealias WireRosterUpdate = PeerMesh_Wire_RosterUpdate
-public typealias WireTransferOffer = PeerMesh_Wire_TransferOffer
-public typealias WireStreamOpen = PeerMesh_Wire_StreamOpen
-public typealias WireTransferId = PeerMesh_Wire_TransferId
+// Ergonomic aliases for the flatc-generated types (namespace Stromo.Wire).
+public typealias WireSignal = Stromo_Wire_Signal
+public typealias WireSignalBody = Stromo_Wire_SignalBody
+public typealias WirePeerInfo = Stromo_Wire_PeerInfo
+public typealias WireInvite = Stromo_Wire_Invite
+public typealias WireInviteResponse = Stromo_Wire_InviteResponse
+public typealias WireCodeConfirm = Stromo_Wire_CodeConfirm
+public typealias WireRosterUpdate = Stromo_Wire_RosterUpdate
+public typealias WireTransferOffer = Stromo_Wire_TransferOffer
+public typealias WireStreamOpen = Stromo_Wire_StreamOpen
+public typealias WireTransferId = Stromo_Wire_TransferId
 
 /// A control-plane message: a verified FlatBuffers buffer read **in place**
 /// (DD-5, DD-6). Zero-copy discipline:
@@ -197,8 +197,8 @@ extension WireTransferId {
 
 // Data-plane stream header (DD-7). Every non-control QUIC stream starts with
 // a size-prefixed StreamHeader; FIN delimits the payload.
-public typealias WireStreamHeader = PeerMesh_Wire_StreamHeader
-public typealias WireStreamKind = PeerMesh_Wire_StreamKind
+public typealias WireStreamHeader = Stromo_Wire_StreamHeader
+public typealias WireStreamKind = Stromo_Wire_StreamKind
 
 /// Delivery semantics for data (FR-15, FR-16, DD-7).
 public enum Delivery: Sendable, Equatable {
@@ -217,7 +217,7 @@ public enum Delivery: Sendable, Equatable {
     case reliableOrdered
     /// Droppable, unordered, low-latency — true datagram semantics, so the
     /// payload must fit one datagram: sends over ``maxDatagramPayload`` throw
-    /// ``PeerMeshError/datagramTooLarge(bytes:limit:)``. For larger droppable
+    /// ``StromoError/datagramTooLarge(bytes:limit:)``. For larger droppable
     /// data, send `.reliable` and supersede at the application layer.
     case datagram
 }
@@ -229,7 +229,7 @@ public enum Recipients: Sendable, Equatable {
     case peers([PeerID])
 }
 
-public enum PeerMeshError: Error, Sendable, Equatable {
+public enum StromoError: Error, Sendable, Equatable {
     /// A surface that is deliberately not wired up yet on this platform or build.
     /// The associated string names it; each call site carries a comment pointing
     /// at the relevant TODO ledger entry (see CLAUDE.md). Current uses: the
@@ -259,29 +259,29 @@ public enum PeerMeshError: Error, Sendable, Equatable {
 
 // NSError bridging renumbers payload cases (failure mode 11) — LocalizedError
 // keeps the diagnostic in localizedDescription.
-extension PeerMeshError: LocalizedError {
+extension StromoError: LocalizedError {
     public var errorDescription: String? {
         switch self {
         case .unimplemented(let surface):
-            return "PeerMesh: \(surface) is not implemented"
+            return "Stromo: \(surface) is not implemented"
         case .localNetworkPermissionDenied:
-            return "PeerMesh: Local Network permission denied"
+            return "Stromo: Local Network permission denied"
         case .invitationTimedOut:
-            return "PeerMesh: invitation timed out"
+            return "Stromo: invitation timed out"
         case .invitationDeclined:
-            return "PeerMesh: invitation declined"
+            return "Stromo: invitation declined"
         case .invitationAlreadyPending(let peer):
-            return "PeerMesh: an invitation to \(peer.displayName) is already pending"
+            return "Stromo: an invitation to \(peer.displayName) is already pending"
         case .peerUnreachable(let peer):
-            return "PeerMesh: peer \(peer.displayName) is unreachable"
+            return "Stromo: peer \(peer.displayName) is unreachable"
         case .datagramTooLarge(let bytes, let limit):
-            return "PeerMesh: .datagram payload is \(bytes) bytes; datagrams cannot exceed \(limit) bytes (they never fragment) — use .reliable for payloads this size"
+            return "Stromo: .datagram payload is \(bytes) bytes; datagrams cannot exceed \(limit) bytes (they never fragment) — use .reliable for payloads this size"
         case .malformedSignal:
-            return "PeerMesh: inbound signal failed verification"
+            return "Stromo: inbound signal failed verification"
         case .resourceTransferIncomplete:
-            return "PeerMesh: resource transfer ended before all bytes arrived"
+            return "Stromo: resource transfer ended before all bytes arrived"
         case .reorderBufferOverflow:
-            return "PeerMesh: ordered-message reorder buffer overflowed"
+            return "Stromo: ordered-message reorder buffer overflowed"
         }
     }
 }

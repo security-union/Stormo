@@ -1,7 +1,7 @@
 import Foundation
 import Testing
 
-@testable import PeerMeshProtocol
+@testable import StromoProtocol
 
 /// Tier-1 tests (DD-6): the complete invitation protocol exercised with NO
 /// transport — no QUIC, no sockets, no async, no clocks. Two engines wired

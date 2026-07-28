@@ -129,7 +129,7 @@ extension IdentityCertificate {
         let addKey: [String: Any] = [
             kSecClass as String: kSecClassKey,
             kSecValueRef as String: secKey,
-            kSecAttrApplicationTag as String: Data("dev.securityunion.peermesh.tls".utf8),
+            kSecAttrApplicationTag as String: Data("dev.securityunion.Stromo.tls".utf8),
             kSecUseDataProtectionKeychain as String: true,
         ]
         let keyStatus = SecItemAdd(addKey as CFDictionary, nil)

@@ -1,5 +1,5 @@
 import Foundation
-import PeerMeshProtocol
+import StromoProtocol
 
 #if canImport(Network)
 import Network
@@ -72,7 +72,7 @@ public final class QUICTransport: PeerTransport, @unchecked Sendable {
     /// every stream's callbacks — runs here, never on main. `.userInitiated`:
     /// the frame path is interactive; default QoS gets deprioritized under
     /// system load.
-    private let queue = DispatchQueue(label: "dev.securityunion.peermesh.quic", qos: .userInitiated)
+    private let queue = DispatchQueue(label: "dev.securityunion.Stromo.quic", qos: .userInitiated)
 
     // Advertiser state.
     private let listenerBox = Locked<NWListener?>(nil)
@@ -98,13 +98,13 @@ public final class QUICTransport: PeerTransport, @unchecked Sendable {
     /// so this is `true`. On platforms with no entitlement-free route it is
     /// `false` — QUIC tests should skip cleanly and hosts should inject a
     /// `SecIdentity` via ``Configuration/tlsProvider``.
-    /// Peer-to-peer Wi-Fi opt-out (`PEERMESH_NO_P2P=1`): same-machine
+    /// Peer-to-peer Wi-Fi opt-out (`Stromo_NO_P2P=1`): same-machine
     /// self-dials fail with `includePeerToPeer` enabled
     /// (docs/spike-results.md), so same-machine test runs disable it.
     /// `getenv`, not `ProcessInfo`: the latter caches the environment at
     /// first access, which silently ignores a test's later `setenv`.
     static var peerToPeerEnabled: Bool {
-        getenv("PEERMESH_NO_P2P") == nil
+        getenv("Stromo_NO_P2P") == nil
     }
 
     /// Bonjour registration types are `_name._tcp|_udp` with a 1–15 char name.
@@ -363,7 +363,7 @@ public final class QUICTransport: PeerTransport, @unchecked Sendable {
         case .bonjour:
             endpoint = endpoints.value[peer.id]
         }
-        guard let endpoint else { throw PeerMeshError.peerUnreachable(peer.id) }
+        guard let endpoint else { throw StromoError.peerUnreachable(peer.id) }
 
         let localIdentity = try makeLocalIdentity(for: identity)
         let isBonjour: Bool
@@ -511,15 +511,15 @@ public struct QUICTransport: PeerTransport {
     public let inboundConnections: AsyncStream<any PeerConnection> = AsyncStream { _ in }
     public init() {}
     public func startAdvertising(service: ServiceDescriptor, metadata: [String: String], identity: PeerIdentity) async throws {
-        throw PeerMeshError.unimplemented("QUICTransport requires Network.framework")
+        throw StromoError.unimplemented("QUICTransport requires Network.framework")
     }
     public func stopAdvertising() async {}
     public func discoveries(service: ServiceDescriptor) async throws -> AsyncStream<DiscoveryEvent> {
-        throw PeerMeshError.unimplemented("QUICTransport requires Network.framework")
+        throw StromoError.unimplemented("QUICTransport requires Network.framework")
     }
     public func stopBrowsing() async {}
     public func connect(to peer: DiscoveredPeer, identity: PeerIdentity, trust: TrustPolicy) async throws -> any PeerConnection {
-        throw PeerMeshError.unimplemented("QUICTransport requires Network.framework")
+        throw StromoError.unimplemented("QUICTransport requires Network.framework")
     }
 }
 

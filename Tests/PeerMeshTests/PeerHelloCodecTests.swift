@@ -1,8 +1,8 @@
 import Foundation
 import Testing
 
-@testable import PeerMesh
-import PeerMeshProtocol
+@testable import Stromo
+import StromoProtocol
 
 #if canImport(Network) && canImport(Security)
 

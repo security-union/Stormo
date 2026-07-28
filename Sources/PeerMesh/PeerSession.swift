@@ -1,6 +1,6 @@
 import Foundation
 
-/// The primary PeerMesh API: discovery, invitation, membership, and data
+/// The primary Stromo API: discovery, invitation, membership, and data
 /// exchange with nearby peers (design document §7).
 ///
 /// MPC-simple by default: one line to construct, encryption always on,
@@ -96,7 +96,7 @@ public actor PeerSession {
     }
 
     /// Full-control entry point (custom identity or transport injection; the
-    /// latter is how PeerMeshTestKit runs sessions without radios, QA-8).
+    /// latter is how StromoTestKit runs sessions without radios, QA-8).
     public init(
         identity: PeerIdentity,
         service: ServiceDescriptor,
@@ -166,7 +166,7 @@ public actor PeerSession {
         knownEndpoints[peer.id] = peer
         return try await withCheckedThrowingContinuation { continuation in
             guard inviteWaiters[peer.id] == nil else {
-                continuation.resume(throwing: PeerMeshError.invitationAlreadyPending(peer.id))
+                continuation.resume(throwing: StromoError.invitationAlreadyPending(peer.id))
                 return
             }
             inviteWaiters[peer.id] = continuation
@@ -183,10 +183,10 @@ public actor PeerSession {
     ) async throws {
         // FR-16: datagrams never fragment, so the cap is part of the contract.
         if delivery == .datagram, payload.count > Delivery.maxDatagramPayload {
-            throw PeerMeshError.datagramTooLarge(
+            throw StromoError.datagramTooLarge(
                 bytes: payload.count, limit: Delivery.maxDatagramPayload)
         }
-        guard !engine.members.isEmpty else { throw PeerMeshError.peerUnreachable(identity.id) }
+        guard !engine.members.isEmpty else { throw StromoError.peerUnreachable(identity.id) }
         run(.command(.send(payload, to: recipients, delivery: delivery)))
     }
 
@@ -196,7 +196,7 @@ public actor PeerSession {
     /// dedicated `transferChunk` stream. Cancel via ``ResourceTransfer/progress``.
     public func sendResource(at url: URL, to peer: PeerID, name resourceName: String? = nil) async throws -> ResourceTransfer {
         guard engine.members.contains(peer), let connection = connections[peer] else {
-            throw PeerMeshError.peerUnreachable(peer)
+            throw StromoError.peerUnreachable(peer)
         }
         let attributes = try FileManager.default.attributesOfItem(atPath: url.path)
         let totalBytes = (attributes[.size] as? NSNumber)?.uint64Value ?? 0
@@ -225,7 +225,7 @@ public actor PeerSession {
     /// on the control stream (`StreamOpen`), then opens the dedicated `appStream`.
     public func openStream(_ label: String, with peer: PeerID) async throws -> any PeerByteStream {
         guard engine.members.contains(peer), let connection = connections[peer] else {
-            throw PeerMeshError.peerUnreachable(peer)
+            throw StromoError.peerUnreachable(peer)
         }
         try await connection.sendSignal(SignalCodec.encode(.streamOpen(label: label)))
         return try await connection.openOutgoingStream(
@@ -246,7 +246,7 @@ public actor PeerSession {
         run(.command(.leave))
         for timer in timers.values { timer.cancel() }
         timers.removeAll()
-        inviteWaiters.forEach { $0.value.resume(throwing: PeerMeshError.peerUnreachable($0.key)) }
+        inviteWaiters.forEach { $0.value.resume(throwing: StromoError.peerUnreachable($0.key)) }
         inviteWaiters.removeAll()
     }
 
@@ -366,11 +366,11 @@ public actor PeerSession {
             membershipContinuation.yield(.left(peer))
 
         case .invitationFailed(let peer, let reason):
-            let error: PeerMeshError
+            let error: StromoError
             switch reason {
-            case .declined: error = PeerMeshError.invitationDeclined
-            case .timedOut: error = PeerMeshError.invitationTimedOut
-            case .connectionLost: error = PeerMeshError.peerUnreachable(peer)
+            case .declined: error = StromoError.invitationDeclined
+            case .timedOut: error = StromoError.invitationTimedOut
+            case .connectionLost: error = StromoError.peerUnreachable(peer)
             }
             inviteWaiters.removeValue(forKey: peer)?.resume(throwing: error)
 
@@ -470,7 +470,7 @@ public actor PeerSession {
             .appendingPathComponent("\(UUID().uuidString)-\(name)")
         FileManager.default.createFile(atPath: tempURL.path, contents: nil)
         guard let handle = try? FileHandle(forWritingTo: tempURL) else {
-            continuation.yield(.failed(name: name, from: from, error: PeerMeshError.resourceTransferIncomplete))
+            continuation.yield(.failed(name: name, from: from, error: StromoError.resourceTransferIncomplete))
             return
         }
 
@@ -494,7 +494,7 @@ public actor PeerSession {
             try? FileManager.default.removeItem(at: tempURL)
             continuation.yield(.failed(
                 name: name, from: from,
-                error: failure ?? PeerMeshError.resourceTransferIncomplete))
+                error: failure ?? StromoError.resourceTransferIncomplete))
         }
     }
 

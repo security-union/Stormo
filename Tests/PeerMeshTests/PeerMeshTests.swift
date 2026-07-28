@@ -1,10 +1,10 @@
 import Foundation
 import Testing
 
-@testable import PeerMesh
+@testable import Stromo
 
-@Suite("PeerMesh core")
-struct PeerMeshTests {
+@Suite("Stromo core")
+struct StromoTests {
 
     @Test("Identity derives PeerID from public key hash")
     func identityDerivesPeerID() {
@@ -46,7 +46,7 @@ struct PeerMeshTests {
             service: "_t._udp",
             transport: InMemoryTransport(hub: hub)
         )
-        await #expect(throws: PeerMeshError.self) {
+        await #expect(throws: StromoError.self) {
             try await session.send(Data([0x01]))
         }
         await session.disconnect()
@@ -58,10 +58,10 @@ struct PeerMeshTests {
     }
 }
 
-import PeerMeshTestKit
+import StromoTestKit
 
 #if canImport(Network) && canImport(Security)
-extension PeerMeshTests {
+extension StromoTests {
     @Test("Invalid Bonjour service types are rejected loudly, not silently")
     func bonjourTypeValidation() throws {
         // The class of bug that reached physical devices: a bare MPC-style

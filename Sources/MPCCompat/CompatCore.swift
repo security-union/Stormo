@@ -1,12 +1,12 @@
 import Foundation
-import PeerMesh
+import Stromo
 
 /// The shared runtime backing an `MPCCompat` device.
 ///
 /// MultipeerConnectivity splits one logical peer across three objects — an
 /// `MCSession`, an `MCNearbyServiceAdvertiser`, and an `MCNearbyServiceBrowser`
 /// — that an app constructs with the *same* `MCPeerID` and expects to cooperate.
-/// PeerMesh unifies discovery, advertising, invitation, membership, and
+/// Stromo unifies discovery, advertising, invitation, membership, and
 /// messaging into a single ``PeerSession`` actor. `CompatCore` is the bridge:
 /// exactly one instance exists per `(PeerID, serviceType)` pair (see
 /// ``CompatRegistry``), owns the underlying `PeerSession`, runs long-lived pump
@@ -57,7 +57,7 @@ final class CompatCore: @unchecked Sendable {
         self.serviceType = serviceType
         self.transport = transport
         // We only hold the app's PeerID (public-key hash + display name), never
-        // its private key, so the underlying session runs a PeerMesh identity
+        // its private key, so the underlying session runs a Stromo identity
         // keyed on the display name — persisted (FR-20), so every screen visit
         // and relaunch presents the SAME peer. Without persistence each core
         // minted a fresh key, and browsers piled up ghost entries of one
@@ -72,7 +72,7 @@ final class CompatCore: @unchecked Sendable {
 
     /// MPC-style service types are bare identifiers (`"remotecam"`);
     /// `MCNearbyServiceAdvertiser` translated them to Bonjour registration
-    /// types internally. PeerMesh's Bonjour discovery needs the full form, so
+    /// types internally. Stromo's Bonjour discovery needs the full form, so
     /// the bridge performs the same translation: `"remotecam"` →
     /// `"_remotecam._udp"` (UDP — the QUIC transport). Apps must declare that
     /// type under `NSBonjourServices` (MPC apps already declare both `._tcp`

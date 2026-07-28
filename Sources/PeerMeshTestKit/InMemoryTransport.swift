@@ -1,5 +1,5 @@
 import Foundation
-import PeerMesh
+import Stromo
 
 /// In-process transport for tests and mesh simulation (QA-8): exercises the
 /// full runtime — discovery, invitation, membership, messaging — with no
@@ -68,7 +68,7 @@ public final class InMemoryTransport: PeerTransport, @unchecked Sendable {
         /// inbound stream receives the other.
         func connect(to peerID: PeerID, from identity: PeerIdentity) throws -> any PeerConnection {
             guard let ad = advertisements[peerID] else {
-                throw PeerMeshError.peerUnreachable(peerID)
+                throw StromoError.peerUnreachable(peerID)
             }
             let (dialerEnd, listenerEnd) = InMemoryConnection.pair(
                 dialer: identity, listener: ad.identity)
@@ -156,21 +156,21 @@ final class InMemoryConnection: PeerConnection, @unchecked Sendable {
 
     func sendSignal(_ bytes: Data) async throws {
         guard !closed.value, let partner = partnerBox.value else {
-            throw PeerMeshError.peerUnreachable(remotePeer)
+            throw StromoError.peerUnreachable(remotePeer)
         }
         partner.ownContinuation.yield(.signal(bytes))
     }
 
     func sendData(_ payload: Data, delivery: Delivery, sequence: UInt64?) async throws {
         guard !closed.value, let partner = partnerBox.value else {
-            throw PeerMeshError.peerUnreachable(remotePeer)
+            throw StromoError.peerUnreachable(remotePeer)
         }
         partner.ownContinuation.yield(.data(payload, delivery, sequence: sequence))
     }
 
     func openOutgoingStream(header: StreamHeaderInfo) async throws -> any PeerByteStream {
         guard !closed.value, let partner = partnerBox.value else {
-            throw PeerMeshError.peerUnreachable(remotePeer)
+            throw StromoError.peerUnreachable(remotePeer)
         }
         // The dedicated stream is a paired byte pipe; the writer stays local,
         // the reader surfaces on the partner's incomingStreams (with the header).
@@ -221,7 +221,7 @@ final class InMemoryByteStream: PeerByteStream, @unchecked Sendable {
 
     func write(_ data: Data) async throws {
         guard !finished.value, let partner = partnerBox.value else {
-            throw PeerMeshError.resourceTransferIncomplete
+            throw StromoError.resourceTransferIncomplete
         }
         partner.incomingContinuation.yield(data)
     }

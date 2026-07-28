@@ -3,11 +3,11 @@ import Foundation
 
 /// libp2p-compatible identity encoding (DD-8).
 ///
-/// PeerMesh derives its ``PeerID`` from the peer's public key exactly the way
+/// Stromo derives its ``PeerID`` from the peer's public key exactly the way
 /// libp2p does, so a future libp2p bridge stays identity-compatible. This helper
 /// is deliberately dependency-free (only CryptoKit's SHA-256, a pure CPU hash —
-/// no I/O, consistent with the sans-I/O `PeerMeshProtocol` target, DD-6) and is
-/// shared by both `PeerMeshProtocol` and `PeerMesh` so the two never disagree on
+/// no I/O, consistent with the sans-I/O `StromoProtocol` target, DD-6) and is
+/// shared by both `StromoProtocol` and `Stromo` so the two never disagree on
 /// the byte layout.
 ///
 /// ## PeerID multihash byte layout (34 bytes)

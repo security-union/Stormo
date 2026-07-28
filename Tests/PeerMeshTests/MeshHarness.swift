@@ -1,7 +1,7 @@
 import Foundation
 import Testing
 
-import PeerMesh
+import Stromo
 
 /// N-peer mesh test harness (QA-2 / QA-8): full-mesh formation over any
 /// `PeerTransport`, a traffic pump with self-verifying payloads, and the

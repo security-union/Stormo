@@ -1,7 +1,7 @@
 import Foundation
 import Testing
 
-@testable import PeerMeshProtocol
+@testable import StromoProtocol
 
 @Suite("SignalCodec — verified zero-copy boundary (DD-5)")
 struct SignalCodecTests {
@@ -32,10 +32,10 @@ struct SignalCodecTests {
     @Test("Verifier rejects malformed bytes as malformedSignal, never traps")
     func rejectsGarbage() {
         let garbage = Data((0..<64).map { _ in UInt8.random(in: .min ... .max) })
-        #expect(throws: PeerMeshError.malformedSignal) {
+        #expect(throws: StromoError.malformedSignal) {
             _ = try SignalCodec.decode(garbage)
         }
-        #expect(throws: PeerMeshError.malformedSignal) {
+        #expect(throws: StromoError.malformedSignal) {
             _ = try SignalCodec.decode(Data())
         }
     }
@@ -43,7 +43,7 @@ struct SignalCodecTests {
     @Test("Size cap enforced before any parsing (DD-5 rule 3)")
     func sizeCap() {
         let oversized = Data(count: SignalCodec.maxControlMessageSize + 1)
-        #expect(throws: PeerMeshError.malformedSignal) {
+        #expect(throws: StromoError.malformedSignal) {
             _ = try SignalCodec.decode(oversized)
         }
     }

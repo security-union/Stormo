@@ -1,7 +1,7 @@
 import Foundation
 import Testing
 
-import PeerMesh
+import Stromo
 
 @Suite("QUIC smoke", .serialized)
 struct QUICSmokeTests {
@@ -77,7 +77,7 @@ extension QUICSmokeTests {
         guard QUICTransport.isTLSIdentityAvailable(for: PeerIdentity(name: "probe")) else {
             print("[skip] QUIC: no TLS identity in this environment"); return
         }
-        setenv("PEERMESH_NO_P2P", "1", 1)
+        setenv("Stromo_NO_P2P", "1", 1)
         let service = ServiceDescriptor(type: "_pmbj\(UInt16.random(in: 1000...9999))._udp")
         func transport() -> QUICTransport { QUICTransport(configuration: .init(discovery: .bonjour)) }
         let camera = PeerSession(

@@ -100,14 +100,14 @@ public struct FileIdentityStore: IdentityStore {
 /// `SecureEnclave.isAvailable`; otherwise a software P-256 key is used
 /// (simulator/CI/Intel Macs without an enclave). Either way the serialized key
 /// material lives as a `kSecClassKey` item tagged
-/// `dev.securityunion.peermesh.identity`, in the data-protection keychain.
+/// `dev.securityunion.Stromo.identity`, in the data-protection keychain.
 ///
 /// Note: Secure Enclave keys can never export a private-key `derRepresentation`
 /// (only the public key can) — that is fine; we persist the enclave key's opaque
 /// `dataRepresentation` reference blob and the key signs in place.
 public struct KeychainIdentityStore: IdentityStore {
     /// Application-tag prefix for identity items (per-name suffix appended).
-    public static let applicationTag = "dev.securityunion.peermesh.identity"
+    public static let applicationTag = "dev.securityunion.Stromo.identity"
 
     public init() {}
 

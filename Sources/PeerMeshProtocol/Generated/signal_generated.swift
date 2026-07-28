@@ -4,7 +4,7 @@
 
 import FlatBuffers
 
-public enum PeerMesh_Wire_SignalBody: UInt8, UnionEnum {
+public enum Stromo_Wire_SignalBody: UInt8, UnionEnum {
   public typealias T = UInt8
 
   public init?(value: T) {
@@ -21,13 +21,13 @@ public enum PeerMesh_Wire_SignalBody: UInt8, UnionEnum {
   case transferoffer = 5
   case streamopen = 6
 
-  public static var max: PeerMesh_Wire_SignalBody { return .streamopen }
-  public static var min: PeerMesh_Wire_SignalBody { return .none_ }
+  public static var max: Stromo_Wire_SignalBody { return .streamopen }
+  public static var min: Stromo_Wire_SignalBody { return .none_ }
 }
 
 
 ///  A session member, as carried in rosters (FR-13).
-public struct PeerMesh_Wire_PeerInfo: FlatBufferObject, Verifiable {
+public struct Stromo_Wire_PeerInfo: FlatBufferObject, Verifiable {
 
   static func validateVersion() { FlatBuffersVersion_25_2_10() }
   public var __buffer: ByteBuffer! { return _accessor.bb }
@@ -59,10 +59,10 @@ public struct PeerMesh_Wire_PeerInfo: FlatBufferObject, Verifiable {
     keyHashVectorOffset keyHash: Offset = Offset(),
     displayNameOffset displayName: Offset = Offset()
   ) -> Offset {
-    let __start = PeerMesh_Wire_PeerInfo.startPeerInfo(&fbb)
-    PeerMesh_Wire_PeerInfo.addVectorOf(keyHash: keyHash, &fbb)
-    PeerMesh_Wire_PeerInfo.add(displayName: displayName, &fbb)
-    return PeerMesh_Wire_PeerInfo.endPeerInfo(&fbb, start: __start)
+    let __start = Stromo_Wire_PeerInfo.startPeerInfo(&fbb)
+    Stromo_Wire_PeerInfo.addVectorOf(keyHash: keyHash, &fbb)
+    Stromo_Wire_PeerInfo.add(displayName: displayName, &fbb)
+    return Stromo_Wire_PeerInfo.endPeerInfo(&fbb, start: __start)
   }
 
   public static func verify<T>(_ verifier: inout Verifier, at position: Int, of type: T.Type) throws where T: Verifiable {
@@ -75,7 +75,7 @@ public struct PeerMesh_Wire_PeerInfo: FlatBufferObject, Verifiable {
 
 ///  Invitation to join a session (FR-6). First message on the control stream
 ///  after the QUIC handshake (encrypted, not yet authorized).
-public struct PeerMesh_Wire_Invite: FlatBufferObject, Verifiable {
+public struct Stromo_Wire_Invite: FlatBufferObject, Verifiable {
 
   static func validateVersion() { FlatBuffersVersion_25_2_10() }
   public var __buffer: ByteBuffer! { return _accessor.bb }
@@ -91,7 +91,7 @@ public struct PeerMesh_Wire_Invite: FlatBufferObject, Verifiable {
     var p: VOffset { self.rawValue }
   }
 
-  public var inviter: PeerMesh_Wire_PeerInfo? { let o = _accessor.offset(VTOFFSET.inviter.v); return o == 0 ? nil : PeerMesh_Wire_PeerInfo(_accessor.bb, o: _accessor.indirect(o + _accessor.position)) }
+  public var inviter: Stromo_Wire_PeerInfo? { let o = _accessor.offset(VTOFFSET.inviter.v); return o == 0 ? nil : Stromo_Wire_PeerInfo(_accessor.bb, o: _accessor.indirect(o + _accessor.position)) }
   ///  Opaque application context (FR-6). Capped by SignalCodec's control-message
   ///  limit; larger contexts are chunked (DD-5 rule 3).
   public var hasContext: Bool { let o = _accessor.offset(VTOFFSET.context.v); return o == 0 ? false : true }
@@ -107,22 +107,22 @@ public struct PeerMesh_Wire_Invite: FlatBufferObject, Verifiable {
     inviterOffset inviter: Offset = Offset(),
     contextVectorOffset context: Offset = Offset()
   ) -> Offset {
-    let __start = PeerMesh_Wire_Invite.startInvite(&fbb)
-    PeerMesh_Wire_Invite.add(inviter: inviter, &fbb)
-    PeerMesh_Wire_Invite.addVectorOf(context: context, &fbb)
-    return PeerMesh_Wire_Invite.endInvite(&fbb, start: __start)
+    let __start = Stromo_Wire_Invite.startInvite(&fbb)
+    Stromo_Wire_Invite.add(inviter: inviter, &fbb)
+    Stromo_Wire_Invite.addVectorOf(context: context, &fbb)
+    return Stromo_Wire_Invite.endInvite(&fbb, start: __start)
   }
 
   public static func verify<T>(_ verifier: inout Verifier, at position: Int, of type: T.Type) throws where T: Verifiable {
     var _v = try verifier.visitTable(at: position)
-    try _v.visit(field: VTOFFSET.inviter.p, fieldName: "inviter", required: false, type: ForwardOffset<PeerMesh_Wire_PeerInfo>.self)
+    try _v.visit(field: VTOFFSET.inviter.p, fieldName: "inviter", required: false, type: ForwardOffset<Stromo_Wire_PeerInfo>.self)
     try _v.visit(field: VTOFFSET.context.p, fieldName: "context", required: false, type: ForwardOffset<Vector<UInt8, UInt8>>.self)
     _v.finish()
   }
 }
 
 ///  Response to an Invite (FR-7).
-public struct PeerMesh_Wire_InviteResponse: FlatBufferObject, Verifiable {
+public struct Stromo_Wire_InviteResponse: FlatBufferObject, Verifiable {
 
   static func validateVersion() { FlatBuffersVersion_25_2_10() }
   public var __buffer: ByteBuffer! { return _accessor.bb }
@@ -143,7 +143,7 @@ public struct PeerMesh_Wire_InviteResponse: FlatBufferObject, Verifiable {
   ///  one round-trip (FR-13).
   public var hasRoster: Bool { let o = _accessor.offset(VTOFFSET.roster.v); return o == 0 ? false : true }
   public var rosterCount: Int32 { let o = _accessor.offset(VTOFFSET.roster.v); return o == 0 ? 0 : _accessor.vector(count: o) }
-  public func roster(at index: Int32) -> PeerMesh_Wire_PeerInfo? { let o = _accessor.offset(VTOFFSET.roster.v); return o == 0 ? nil : PeerMesh_Wire_PeerInfo(_accessor.bb, o: _accessor.indirect(_accessor.vector(at: o) + index * 4)) }
+  public func roster(at index: Int32) -> Stromo_Wire_PeerInfo? { let o = _accessor.offset(VTOFFSET.roster.v); return o == 0 ? nil : Stromo_Wire_PeerInfo(_accessor.bb, o: _accessor.indirect(_accessor.vector(at: o) + index * 4)) }
   public static func startInviteResponse(_ fbb: inout FlatBufferBuilder) -> UOffset { fbb.startTable(with: 2) }
   public static func add(accepted: Bool, _ fbb: inout FlatBufferBuilder) { fbb.add(element: accepted, def: false,
    at: VTOFFSET.accepted.p) }
@@ -154,22 +154,22 @@ public struct PeerMesh_Wire_InviteResponse: FlatBufferObject, Verifiable {
     accepted: Bool = false,
     rosterVectorOffset roster: Offset = Offset()
   ) -> Offset {
-    let __start = PeerMesh_Wire_InviteResponse.startInviteResponse(&fbb)
-    PeerMesh_Wire_InviteResponse.add(accepted: accepted, &fbb)
-    PeerMesh_Wire_InviteResponse.addVectorOf(roster: roster, &fbb)
-    return PeerMesh_Wire_InviteResponse.endInviteResponse(&fbb, start: __start)
+    let __start = Stromo_Wire_InviteResponse.startInviteResponse(&fbb)
+    Stromo_Wire_InviteResponse.add(accepted: accepted, &fbb)
+    Stromo_Wire_InviteResponse.addVectorOf(roster: roster, &fbb)
+    return Stromo_Wire_InviteResponse.endInviteResponse(&fbb, start: __start)
   }
 
   public static func verify<T>(_ verifier: inout Verifier, at position: Int, of type: T.Type) throws where T: Verifiable {
     var _v = try verifier.visitTable(at: position)
     try _v.visit(field: VTOFFSET.accepted.p, fieldName: "accepted", required: false, type: Bool.self)
-    try _v.visit(field: VTOFFSET.roster.p, fieldName: "roster", required: false, type: ForwardOffset<Vector<ForwardOffset<PeerMesh_Wire_PeerInfo>, PeerMesh_Wire_PeerInfo>>.self)
+    try _v.visit(field: VTOFFSET.roster.p, fieldName: "roster", required: false, type: ForwardOffset<Vector<ForwardOffset<Stromo_Wire_PeerInfo>, Stromo_Wire_PeerInfo>>.self)
     _v.finish()
   }
 }
 
 ///  Pairing-code transcript confirmation (DD-2, `.pairingCode` mode only).
-public struct PeerMesh_Wire_CodeConfirm: FlatBufferObject, Verifiable {
+public struct Stromo_Wire_CodeConfirm: FlatBufferObject, Verifiable {
 
   static func validateVersion() { FlatBuffersVersion_25_2_10() }
   public var __buffer: ByteBuffer! { return _accessor.bb }
@@ -196,9 +196,9 @@ public struct PeerMesh_Wire_CodeConfirm: FlatBufferObject, Verifiable {
     _ fbb: inout FlatBufferBuilder,
     transcriptMacVectorOffset transcriptMac: Offset = Offset()
   ) -> Offset {
-    let __start = PeerMesh_Wire_CodeConfirm.startCodeConfirm(&fbb)
-    PeerMesh_Wire_CodeConfirm.addVectorOf(transcriptMac: transcriptMac, &fbb)
-    return PeerMesh_Wire_CodeConfirm.endCodeConfirm(&fbb, start: __start)
+    let __start = Stromo_Wire_CodeConfirm.startCodeConfirm(&fbb)
+    Stromo_Wire_CodeConfirm.addVectorOf(transcriptMac: transcriptMac, &fbb)
+    return Stromo_Wire_CodeConfirm.endCodeConfirm(&fbb, start: __start)
   }
 
   public static func verify<T>(_ verifier: inout Verifier, at position: Int, of type: T.Type) throws where T: Verifiable {
@@ -209,7 +209,7 @@ public struct PeerMesh_Wire_CodeConfirm: FlatBufferObject, Verifiable {
 }
 
 ///  Membership gossip (FR-13, FR-14).
-public struct PeerMesh_Wire_RosterUpdate: FlatBufferObject, Verifiable {
+public struct Stromo_Wire_RosterUpdate: FlatBufferObject, Verifiable {
 
   static func validateVersion() { FlatBuffersVersion_25_2_10() }
   public var __buffer: ByteBuffer! { return _accessor.bb }
@@ -227,7 +227,7 @@ public struct PeerMesh_Wire_RosterUpdate: FlatBufferObject, Verifiable {
 
   public var hasMembers: Bool { let o = _accessor.offset(VTOFFSET.members.v); return o == 0 ? false : true }
   public var membersCount: Int32 { let o = _accessor.offset(VTOFFSET.members.v); return o == 0 ? 0 : _accessor.vector(count: o) }
-  public func members(at index: Int32) -> PeerMesh_Wire_PeerInfo? { let o = _accessor.offset(VTOFFSET.members.v); return o == 0 ? nil : PeerMesh_Wire_PeerInfo(_accessor.bb, o: _accessor.indirect(_accessor.vector(at: o) + index * 4)) }
+  public func members(at index: Int32) -> Stromo_Wire_PeerInfo? { let o = _accessor.offset(VTOFFSET.members.v); return o == 0 ? nil : Stromo_Wire_PeerInfo(_accessor.bb, o: _accessor.indirect(_accessor.vector(at: o) + index * 4)) }
   ///  Monotonic epoch for last-writer-wins convergence.
   public var epoch: UInt64 { let o = _accessor.offset(VTOFFSET.epoch.v); return o == 0 ? 0 : _accessor.readBuffer(of: UInt64.self, at: o) }
   public static func startRosterUpdate(_ fbb: inout FlatBufferBuilder) -> UOffset { fbb.startTable(with: 2) }
@@ -239,22 +239,22 @@ public struct PeerMesh_Wire_RosterUpdate: FlatBufferObject, Verifiable {
     membersVectorOffset members: Offset = Offset(),
     epoch: UInt64 = 0
   ) -> Offset {
-    let __start = PeerMesh_Wire_RosterUpdate.startRosterUpdate(&fbb)
-    PeerMesh_Wire_RosterUpdate.addVectorOf(members: members, &fbb)
-    PeerMesh_Wire_RosterUpdate.add(epoch: epoch, &fbb)
-    return PeerMesh_Wire_RosterUpdate.endRosterUpdate(&fbb, start: __start)
+    let __start = Stromo_Wire_RosterUpdate.startRosterUpdate(&fbb)
+    Stromo_Wire_RosterUpdate.addVectorOf(members: members, &fbb)
+    Stromo_Wire_RosterUpdate.add(epoch: epoch, &fbb)
+    return Stromo_Wire_RosterUpdate.endRosterUpdate(&fbb, start: __start)
   }
 
   public static func verify<T>(_ verifier: inout Verifier, at position: Int, of type: T.Type) throws where T: Verifiable {
     var _v = try verifier.visitTable(at: position)
-    try _v.visit(field: VTOFFSET.members.p, fieldName: "members", required: false, type: ForwardOffset<Vector<ForwardOffset<PeerMesh_Wire_PeerInfo>, PeerMesh_Wire_PeerInfo>>.self)
+    try _v.visit(field: VTOFFSET.members.p, fieldName: "members", required: false, type: ForwardOffset<Vector<ForwardOffset<Stromo_Wire_PeerInfo>, Stromo_Wire_PeerInfo>>.self)
     try _v.visit(field: VTOFFSET.epoch.p, fieldName: "epoch", required: false, type: UInt64.self)
     _v.finish()
   }
 }
 
 ///  Announces an incoming resource transfer on a dedicated stream (FR-17).
-public struct PeerMesh_Wire_TransferOffer: FlatBufferObject, Verifiable {
+public struct Stromo_Wire_TransferOffer: FlatBufferObject, Verifiable {
 
   static func validateVersion() { FlatBuffersVersion_25_2_10() }
   public var __buffer: ByteBuffer! { return _accessor.bb }
@@ -271,32 +271,32 @@ public struct PeerMesh_Wire_TransferOffer: FlatBufferObject, Verifiable {
     var p: VOffset { self.rawValue }
   }
 
-  public var transferId: PeerMesh_Wire_TransferId? { let o = _accessor.offset(VTOFFSET.transferId.v); return o == 0 ? nil : _accessor.readBuffer(of: PeerMesh_Wire_TransferId.self, at: o) }
-  public var mutableTransferId: PeerMesh_Wire_TransferId_Mutable? { let o = _accessor.offset(VTOFFSET.transferId.v); return o == 0 ? nil : PeerMesh_Wire_TransferId_Mutable(_accessor.bb, o: o + _accessor.position) }
+  public var transferId: Stromo_Wire_TransferId? { let o = _accessor.offset(VTOFFSET.transferId.v); return o == 0 ? nil : _accessor.readBuffer(of: Stromo_Wire_TransferId.self, at: o) }
+  public var mutableTransferId: Stromo_Wire_TransferId_Mutable? { let o = _accessor.offset(VTOFFSET.transferId.v); return o == 0 ? nil : Stromo_Wire_TransferId_Mutable(_accessor.bb, o: o + _accessor.position) }
   public var name: String? { let o = _accessor.offset(VTOFFSET.name.v); return o == 0 ? nil : _accessor.string(at: o) }
   public var nameSegmentArray: [UInt8]? { return _accessor.getVector(at: VTOFFSET.name.v) }
   public var totalBytes: UInt64 { let o = _accessor.offset(VTOFFSET.totalBytes.v); return o == 0 ? 0 : _accessor.readBuffer(of: UInt64.self, at: o) }
   public static func startTransferOffer(_ fbb: inout FlatBufferBuilder) -> UOffset { fbb.startTable(with: 3) }
-  public static func add(transferId: PeerMesh_Wire_TransferId?, _ fbb: inout FlatBufferBuilder) { guard let transferId = transferId else { return }; fbb.create(struct: transferId, position: VTOFFSET.transferId.p) }
+  public static func add(transferId: Stromo_Wire_TransferId?, _ fbb: inout FlatBufferBuilder) { guard let transferId = transferId else { return }; fbb.create(struct: transferId, position: VTOFFSET.transferId.p) }
   public static func add(name: Offset, _ fbb: inout FlatBufferBuilder) { fbb.add(offset: name, at: VTOFFSET.name.p) }
   public static func add(totalBytes: UInt64, _ fbb: inout FlatBufferBuilder) { fbb.add(element: totalBytes, def: 0, at: VTOFFSET.totalBytes.p) }
   public static func endTransferOffer(_ fbb: inout FlatBufferBuilder, start: UOffset) -> Offset { let end = Offset(offset: fbb.endTable(at: start)); return end }
   public static func createTransferOffer(
     _ fbb: inout FlatBufferBuilder,
-    transferId: PeerMesh_Wire_TransferId? = nil,
+    transferId: Stromo_Wire_TransferId? = nil,
     nameOffset name: Offset = Offset(),
     totalBytes: UInt64 = 0
   ) -> Offset {
-    let __start = PeerMesh_Wire_TransferOffer.startTransferOffer(&fbb)
-    PeerMesh_Wire_TransferOffer.add(transferId: transferId, &fbb)
-    PeerMesh_Wire_TransferOffer.add(name: name, &fbb)
-    PeerMesh_Wire_TransferOffer.add(totalBytes: totalBytes, &fbb)
-    return PeerMesh_Wire_TransferOffer.endTransferOffer(&fbb, start: __start)
+    let __start = Stromo_Wire_TransferOffer.startTransferOffer(&fbb)
+    Stromo_Wire_TransferOffer.add(transferId: transferId, &fbb)
+    Stromo_Wire_TransferOffer.add(name: name, &fbb)
+    Stromo_Wire_TransferOffer.add(totalBytes: totalBytes, &fbb)
+    return Stromo_Wire_TransferOffer.endTransferOffer(&fbb, start: __start)
   }
 
   public static func verify<T>(_ verifier: inout Verifier, at position: Int, of type: T.Type) throws where T: Verifiable {
     var _v = try verifier.visitTable(at: position)
-    try _v.visit(field: VTOFFSET.transferId.p, fieldName: "transferId", required: false, type: PeerMesh_Wire_TransferId.self)
+    try _v.visit(field: VTOFFSET.transferId.p, fieldName: "transferId", required: false, type: Stromo_Wire_TransferId.self)
     try _v.visit(field: VTOFFSET.name.p, fieldName: "name", required: false, type: ForwardOffset<String>.self)
     try _v.visit(field: VTOFFSET.totalBytes.p, fieldName: "totalBytes", required: false, type: UInt64.self)
     _v.finish()
@@ -304,7 +304,7 @@ public struct PeerMesh_Wire_TransferOffer: FlatBufferObject, Verifiable {
 }
 
 ///  Announces an application byte stream opening on a dedicated stream (FR-18).
-public struct PeerMesh_Wire_StreamOpen: FlatBufferObject, Verifiable {
+public struct Stromo_Wire_StreamOpen: FlatBufferObject, Verifiable {
 
   static func validateVersion() { FlatBuffersVersion_25_2_10() }
   public var __buffer: ByteBuffer! { return _accessor.bb }
@@ -328,9 +328,9 @@ public struct PeerMesh_Wire_StreamOpen: FlatBufferObject, Verifiable {
     _ fbb: inout FlatBufferBuilder,
     labelOffset label: Offset = Offset()
   ) -> Offset {
-    let __start = PeerMesh_Wire_StreamOpen.startStreamOpen(&fbb)
-    PeerMesh_Wire_StreamOpen.add(label: label, &fbb)
-    return PeerMesh_Wire_StreamOpen.endStreamOpen(&fbb, start: __start)
+    let __start = Stromo_Wire_StreamOpen.startStreamOpen(&fbb)
+    Stromo_Wire_StreamOpen.add(label: label, &fbb)
+    return Stromo_Wire_StreamOpen.endStreamOpen(&fbb, start: __start)
   }
 
   public static func verify<T>(_ verifier: inout Verifier, at position: Int, of type: T.Type) throws where T: Verifiable {
@@ -342,7 +342,7 @@ public struct PeerMesh_Wire_StreamOpen: FlatBufferObject, Verifiable {
 
 ///  Envelope for every control-plane message (DD-5 rule 1). Size-prefixed on
 ///  the wire. Unknown body variants are ignored-and-logged, never fatal (QA-11).
-public struct PeerMesh_Wire_Signal: FlatBufferObject, Verifiable {
+public struct Stromo_Wire_Signal: FlatBufferObject, Verifiable {
 
   static func validateVersion() { FlatBuffersVersion_25_2_10() }
   public var __buffer: ByteBuffer! { return _accessor.bb }
@@ -358,41 +358,41 @@ public struct PeerMesh_Wire_Signal: FlatBufferObject, Verifiable {
     var p: VOffset { self.rawValue }
   }
 
-  public var bodyType: PeerMesh_Wire_SignalBody { let o = _accessor.offset(VTOFFSET.bodyType.v); return o == 0 ? .none_ : PeerMesh_Wire_SignalBody(rawValue: _accessor.readBuffer(of: UInt8.self, at: o)) ?? .none_ }
+  public var bodyType: Stromo_Wire_SignalBody { let o = _accessor.offset(VTOFFSET.bodyType.v); return o == 0 ? .none_ : Stromo_Wire_SignalBody(rawValue: _accessor.readBuffer(of: UInt8.self, at: o)) ?? .none_ }
   public func body<T: FlatbuffersInitializable>(type: T.Type) -> T? { let o = _accessor.offset(VTOFFSET.body.v); return o == 0 ? nil : _accessor.union(o) }
   public static func startSignal(_ fbb: inout FlatBufferBuilder) -> UOffset { fbb.startTable(with: 2) }
-  public static func add(bodyType: PeerMesh_Wire_SignalBody, _ fbb: inout FlatBufferBuilder) { fbb.add(element: bodyType.rawValue, def: 0, at: VTOFFSET.bodyType.p) }
+  public static func add(bodyType: Stromo_Wire_SignalBody, _ fbb: inout FlatBufferBuilder) { fbb.add(element: bodyType.rawValue, def: 0, at: VTOFFSET.bodyType.p) }
   public static func add(body: Offset, _ fbb: inout FlatBufferBuilder) { fbb.add(offset: body, at: VTOFFSET.body.p) }
   public static func endSignal(_ fbb: inout FlatBufferBuilder, start: UOffset) -> Offset { let end = Offset(offset: fbb.endTable(at: start)); return end }
   public static func createSignal(
     _ fbb: inout FlatBufferBuilder,
-    bodyType: PeerMesh_Wire_SignalBody = .none_,
+    bodyType: Stromo_Wire_SignalBody = .none_,
     bodyOffset body: Offset = Offset()
   ) -> Offset {
-    let __start = PeerMesh_Wire_Signal.startSignal(&fbb)
-    PeerMesh_Wire_Signal.add(bodyType: bodyType, &fbb)
-    PeerMesh_Wire_Signal.add(body: body, &fbb)
-    return PeerMesh_Wire_Signal.endSignal(&fbb, start: __start)
+    let __start = Stromo_Wire_Signal.startSignal(&fbb)
+    Stromo_Wire_Signal.add(bodyType: bodyType, &fbb)
+    Stromo_Wire_Signal.add(body: body, &fbb)
+    return Stromo_Wire_Signal.endSignal(&fbb, start: __start)
   }
 
   public static func verify<T>(_ verifier: inout Verifier, at position: Int, of type: T.Type) throws where T: Verifiable {
     var _v = try verifier.visitTable(at: position)
-    try _v.visit(unionKey: VTOFFSET.bodyType.p, unionField: VTOFFSET.body.p, unionKeyName: "bodyType", fieldName: "body", required: false, completion: { (verifier, key: PeerMesh_Wire_SignalBody, pos) in
+    try _v.visit(unionKey: VTOFFSET.bodyType.p, unionField: VTOFFSET.body.p, unionKeyName: "bodyType", fieldName: "body", required: false, completion: { (verifier, key: Stromo_Wire_SignalBody, pos) in
       switch key {
       case .none_:
         break // NOTE - SWIFT doesnt support none
       case .invite:
-        try ForwardOffset<PeerMesh_Wire_Invite>.verify(&verifier, at: pos, of: PeerMesh_Wire_Invite.self)
+        try ForwardOffset<Stromo_Wire_Invite>.verify(&verifier, at: pos, of: Stromo_Wire_Invite.self)
       case .inviteresponse:
-        try ForwardOffset<PeerMesh_Wire_InviteResponse>.verify(&verifier, at: pos, of: PeerMesh_Wire_InviteResponse.self)
+        try ForwardOffset<Stromo_Wire_InviteResponse>.verify(&verifier, at: pos, of: Stromo_Wire_InviteResponse.self)
       case .codeconfirm:
-        try ForwardOffset<PeerMesh_Wire_CodeConfirm>.verify(&verifier, at: pos, of: PeerMesh_Wire_CodeConfirm.self)
+        try ForwardOffset<Stromo_Wire_CodeConfirm>.verify(&verifier, at: pos, of: Stromo_Wire_CodeConfirm.self)
       case .rosterupdate:
-        try ForwardOffset<PeerMesh_Wire_RosterUpdate>.verify(&verifier, at: pos, of: PeerMesh_Wire_RosterUpdate.self)
+        try ForwardOffset<Stromo_Wire_RosterUpdate>.verify(&verifier, at: pos, of: Stromo_Wire_RosterUpdate.self)
       case .transferoffer:
-        try ForwardOffset<PeerMesh_Wire_TransferOffer>.verify(&verifier, at: pos, of: PeerMesh_Wire_TransferOffer.self)
+        try ForwardOffset<Stromo_Wire_TransferOffer>.verify(&verifier, at: pos, of: Stromo_Wire_TransferOffer.self)
       case .streamopen:
-        try ForwardOffset<PeerMesh_Wire_StreamOpen>.verify(&verifier, at: pos, of: PeerMesh_Wire_StreamOpen.self)
+        try ForwardOffset<Stromo_Wire_StreamOpen>.verify(&verifier, at: pos, of: Stromo_Wire_StreamOpen.self)
       }
     })
     _v.finish()

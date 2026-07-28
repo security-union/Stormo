@@ -7,7 +7,7 @@ import FlatBuffers
 ///  A 128-bit transfer identifier: the two 8-byte halves of a `uuid_t`, in
 ///  memory order. A fixed-size struct — no vector length word, and the
 ///  16-byte contract is enforced by the schema instead of a runtime check.
-public struct PeerMesh_Wire_TransferId: NativeStruct, Verifiable, FlatbuffersInitializable {
+public struct Stromo_Wire_TransferId: NativeStruct, Verifiable, FlatbuffersInitializable {
 
   static func validateVersion() { FlatBuffersVersion_25_2_10() }
 
@@ -34,14 +34,14 @@ public struct PeerMesh_Wire_TransferId: NativeStruct, Verifiable, FlatbuffersIni
   public var lo: UInt64 { _lo }
 
   public static func verify<T>(_ verifier: inout Verifier, at position: Int, of type: T.Type) throws where T: Verifiable {
-    try verifier.inBuffer(position: position, of: PeerMesh_Wire_TransferId.self)
+    try verifier.inBuffer(position: position, of: Stromo_Wire_TransferId.self)
   }
 }
 
 ///  A 128-bit transfer identifier: the two 8-byte halves of a `uuid_t`, in
 ///  memory order. A fixed-size struct — no vector length word, and the
 ///  16-byte contract is enforced by the schema instead of a runtime check.
-public struct PeerMesh_Wire_TransferId_Mutable: FlatBufferObject {
+public struct Stromo_Wire_TransferId_Mutable: FlatBufferObject {
 
   static func validateVersion() { FlatBuffersVersion_25_2_10() }
   public var __buffer: ByteBuffer! { return _accessor.bb }
