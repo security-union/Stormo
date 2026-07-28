@@ -1,6 +1,6 @@
 #!/bin/bash
 # Cross-process E2E over the production Bonjour + QUIC path (tier 2.5):
-# builds the peermesh CLI, runs a host and a joiner as SEPARATE processes,
+# builds the Stormo CLI, runs a host and a joiner as SEPARATE processes,
 # and requires a full discovery → invite → message → echo → departure cycle.
 # This is the rung between in-process loopback tests and physical devices —
 # it caught the QUIC FIN bug and the inbound-retention bug.
@@ -12,7 +12,7 @@ LOGDIR="$(mktemp -d)"
 trap 'kill $HOST_PID 2>/dev/null || true; rm -rf "$LOGDIR"' EXIT
 
 swift build > /dev/null
-BIN="$(swift build --show-bin-path)/peermesh-cli"
+BIN="$(swift build --show-bin-path)/stormo-cli"
 
 # GNU timeout is absent on stock macOS (incl. GitHub runners); perl is not.
 with_timeout() { perl -e 'alarm shift; exec @ARGV' "$@"; }

@@ -1,4 +1,4 @@
-# Design Document: PeerMesh — A Modern Peer-to-Peer Session Framework for Apple Platforms
+# Design Document: Stormo — A Modern Peer-to-Peer Session Framework for Apple Platforms
 
 **Design Document — SU-2026-DD-001 (Draft 1)**
 
@@ -9,13 +9,13 @@
 | **Status** | Draft — requirements baselined; architecture in progress |
 | **Companion document** | *Feasibility Study: A Third-Party Replacement for Apple's MultipeerConnectivity Framework* (SU-2026-TR-001) |
 
-*Working name `PeerMesh` is a placeholder pending a trademark/Swift Package Index availability check. Quality attribute requirements use the SEI six-part scenario form (source – stimulus – artifact – environment – response – response measure).*
+*Working name `Stormo` is a placeholder pending a trademark/Swift Package Index availability check. Quality attribute requirements use the SEI six-part scenario form (source – stimulus – artifact – environment – response – response measure).*
 
 ---
 
 ## 1. Purpose and Scope
 
-PeerMesh is an open-source Swift package providing discovery, secure session establishment, and data exchange among nearby Apple devices, replacing the deprecated MultipeerConnectivity (MPC) framework. It consists of:
+Stormo is an open-source Swift package providing discovery, secure session establishment, and data exchange among nearby Apple devices, replacing the deprecated MultipeerConnectivity (MPC) framework. It consists of:
 
 1. a **modern core** built on Network.framework with Swift 6 structured concurrency (`async`/`await`, `AsyncSequence`), QUIC as the primary transport; and
 2. an **`MPCCompat` shim** offering a near-drop-in migration surface for existing MPC code.
@@ -80,7 +80,7 @@ Priority: **M** = must (1.0), **S** = should (1.x), **C** = could (post-1.0).
 
 ### 3.6 UI Components and Compatibility
 
-- **FR-23 (S)** SwiftUI components: a peer browser/picker view and an invitation-consent sheet (replacing `MCBrowserViewController` / `MCAdvertiserAssistant`), fully restyleable, built solely on public PeerMesh APIs.
+- **FR-23 (S)** SwiftUI components: a peer browser/picker view and an invitation-consent sheet (replacing `MCBrowserViewController` / `MCAdvertiserAssistant`), fully restyleable, built solely on public Stormo APIs.
 - **FR-24 (S)** **`MPCCompat` module:** near-drop-in analogs of `MCSession`, `MCPeerID`, `MCNearbyServiceAdvertiser/Browser` delegate semantics (original type names, no `MC` prefix; migration = mechanical rename), including `NSStream`-bridged streams and 8-peer-limit emulation flag for behavioral parity testing.
 - **FR-25 (C)** Pluggable transport backends behind a `PeerTransport` protocol: QUIC/Bonjour (1.0), TCP+TLS fallback profile (contingency), Wi-Fi Aware backend for paired-device scenarios on iOS 26+ hardware (post-1.0).
 
@@ -99,15 +99,15 @@ Priority: **M** = must (1.0), **S** = should (1.x), **C** = could (post-1.0).
 | **QA-7** | Modifiability (transport evolution) | Maintainer adds a Wi-Fi Aware backend → change confined to a new `PeerTransport` conformance + capability gating → **zero changes to session, security, messaging, or UI modules; core compiles without the new backend**. |
 | **QA-8** | Testability | CI runs on every commit without physical devices → handshake, mesh membership, topology election, timers, and transfer signaling execute as deterministic sans-I/O engine simulations (DD-6), plus real-QUIC loopback integration tests → **≥ 85% line coverage of non-radio code; full 32-peer mesh simulation in < 60 s on a CI runner; any recorded device-session input log replays deterministically into the engine**. |
 | **QA-9** | Usability (migration) | An MPC app of moderate complexity (advertise+browse+session+send) migrates to `MPCCompat` → **≤ 1 day of work, no architectural changes; diff limited to imports/type renames + Info.plist keys**, validated by a published ported sample app. |
-| **QA-10** | Compatibility (OS floor) | App integrates PeerMesh 1.0 → runs on **iOS 15+/iPadOS 15+/macOS 12+/tvOS 15+/visionOS 1+** (QUIC floor); Wi-Fi Aware features degrade gracefully with runtime capability checks. |
-| **QA-11** | Interoperability (protocol evolution) | A device running an app built against PeerMesh 1.0 joins a session whose other peers run PeerMesh 1.x (newer signaling schema) → signaling interoperates via FlatBuffers evolution rules (DD-5): unknown fields skipped, unknown union variants ignored-and-logged → **session forms and all 1.0-era features function; zero connection failures attributable to schema version skew, proven by golden-file cross-version tests in CI**. |
+| **QA-10** | Compatibility (OS floor) | App integrates Stormo 1.0 → runs on **iOS 15+/iPadOS 15+/macOS 12+/tvOS 15+/visionOS 1+** (QUIC floor); Wi-Fi Aware features degrade gracefully with runtime capability checks. |
+| **QA-11** | Interoperability (protocol evolution) | A device running an app built against Stormo 1.0 joins a session whose other peers run Stormo 1.x (newer signaling schema) → signaling interoperates via FlatBuffers evolution rules (DD-5): unknown fields skipped, unknown union variants ignored-and-logged → **session forms and all 1.0-era features function; zero connection failures attributable to schema version skew, proven by golden-file cross-version tests in CI**. |
 
 ---
 
 ## 5. Constraints (platform-imposed)
 
 - **C-1** AWDL is reachable only via `NWParameters.includePeerToPeer`; path selection is Happy-Eyeballs-driven and cannot be forced to prefer the P2P path.
-- **C-2** No Bluetooth data transport exists for third-party apps; PeerMesh makes no Bluetooth claims.
+- **C-2** No Bluetooth data transport exists for third-party apps; Stormo makes no Bluetooth claims.
 - **C-3** QUIC in Network.framework supports **PKI only, not TLS-PSK** (TN3213) → drives FR-21's identity design.
 - **C-4** `NSLocalNetworkUsageDescription` + `NSBonjourServices` required; standard Bonjour needs no multicast entitlement; Wi-Fi Aware backend would additionally need its entitlement + plist declarations.
 - **C-5** iOS backgrounding suspends advertising/browsing and connections (except future Wi-Fi Aware paired scenarios); the API must make suspension/resume explicit.
@@ -137,7 +137,7 @@ One QUIC connection per peer pair carries everything:
 
 Because of C-3, the WWDC19 passcode/PSK pattern is unavailable on QUIC. Instead: every peer has a persistent P-256 identity (FR-20); TLS always terminates against the peer's self-signed certificate; *authentication* is a policy layered on *encryption* (FR-21).
 
-**The governing principle is MPC-ergonomics parity (FR-21):** MPC's celebrated simplicity was, concretely, *encrypted-but-unauthenticated by default* — `encryptionPreference = .required` auto-generated keys, and the de facto authorization was the user tapping Accept on the invitation (`didReceiveCertificate` accepted everyone unless overridden, and rarely was). PeerMesh's `.automatic` default reproduces exactly that developer and user experience on QUIC: the identity is generated and persisted silently, the self-signed certificate exists only to satisfy the QUIC handshake, the verify block accepts and records the peer key hash, and invitation consent is the authorization step. Zero configuration, no pairing ceremony — and two silent upgrades over MPC: unforgeable key-derived peer IDs, and TOFU continuity warnings if a known peer's key ever changes.
+**The governing principle is MPC-ergonomics parity (FR-21):** MPC's celebrated simplicity was, concretely, *encrypted-but-unauthenticated by default* — `encryptionPreference = .required` auto-generated keys, and the de facto authorization was the user tapping Accept on the invitation (`didReceiveCertificate` accepted everyone unless overridden, and rarely was). Stormo's `.automatic` default reproduces exactly that developer and user experience on QUIC: the identity is generated and persisted silently, the self-signed certificate exists only to satisfy the QUIC handshake, the verify block accepts and records the peer key hash, and invitation consent is the authorization step. Zero configuration, no pairing ceremony — and two silent upgrades over MPC: unforgeable key-derived peer IDs, and TOFU continuity warnings if a known peer's key ever changes.
 
 The opt-in `.pairingCode` mode binds a short user-visible code to the TLS transcript/exporter secret covering both certificates — a MITM cannot present matching codes on both sides. This is strictly stronger than MPC (which authorized on cleartext hostname) and stronger than bare PSK (identity continuity persists across sessions). It exists for apps that genuinely need active-MITM resistance; it is deliberately not the default, because MPC never had it either and imposing a ceremony on every session would betray the framework's reason to exist.
 
@@ -177,7 +177,7 @@ All event delivery via `AsyncSequence`; all operations `async` with cancellation
 
 ### DD-5: Disciplined FlatBuffers for the signaling plane — **adopted**
 
-All control-plane messages (identity bootstrap/PeerHello, invitation, accept/decline, roster gossip, keepalive, topology election, transfer/stream announcements) are FlatBuffers, generated from `.fbs` schemas that are the single source of truth in the repository. Version negotiation is semver carried once per connection in `PeerHello` (same-major interop; a mismatch surfaces as a typed "upgrade required" error naming both versions) — which is why the QUIC ALPN is frozen: bumping it would fail the handshake before hello and hide the diagnosis. `peer_hello.fbs` is therefore a frozen bootstrap contract every major version must parse. Application payloads (FR-15..FR-18) remain opaque bytes — apps serialize however they like; FlatBuffers governs only PeerMesh's own protocol.
+All control-plane messages (identity bootstrap/PeerHello, invitation, accept/decline, roster gossip, keepalive, topology election, transfer/stream announcements) are FlatBuffers, generated from `.fbs` schemas that are the single source of truth in the repository. Version negotiation is semver carried once per connection in `PeerHello` (same-major interop; a mismatch surfaces as a typed "upgrade required" error naming both versions) — which is why the QUIC ALPN is frozen: bumping it would fail the handshake before hello and hide the diagnosis. `peer_hello.fbs` is therefore a frozen bootstrap contract every major version must parse. Application payloads (FR-15..FR-18) remain opaque bytes — apps serialize however they like; FlatBuffers governs only Stormo's own protocol.
 
 **Rationale:** zero-copy access suits a hot control path on many concurrent connections; the schema compiler enforces cross-version wire compatibility mechanically (vs. convention-only discipline in CBOR/JSON); the built-in **verifier** gives structural validation of bytes received from *not-yet-authenticated* peers during the handshake — a security property the signaling path specifically needs; official Swift support ships via SPM (`google/flatbuffers`, `flatc --swift`).
 
@@ -219,9 +219,9 @@ ProtocolEngine.handle(Input) -> [Effect]        // synchronous, deterministic
 | 2. Integration | Real QUIC (`NWConnection`+`NWProtocolQUIC`) over **loopback** between two endpoints in-process: handshake, streams, datagrams, TLS identity | Every commit, macOS CI runner | No radios, no devices |
 | 3. Hardware | AWDL/peer-to-peer Wi-Fi matrix: QA-1, QA-3, QA-4 measures; Spikes S-1/S-2/S-5 | Release gates + OS betas | Physical device lab |
 
-**Platform execution matrix (tiers 1–2):** the same test bundles run on every shipping target — macOS native via `swift test` (fast loop + coverage), and per-destination via `xcodebuild test -scheme PeerMesh-Package` against **iOS Simulator** and **Mac Catalyst** (tvOS/visionOS simulators when installed). This is the pattern used by swift-nio, Apple's own packages, and the major Swift OSS projects: one suite, N destinations, no per-platform test code. Network.framework QUIC works over loopback in the iOS Simulator and Catalyst, so tier 2 runs on all of them without radios. Aspirational tier-1 extension (FoundationDB-style deterministic simulation testing): seeded random command/interleaving exploration against engine invariants — the seed arrives as engine input, so any nightly failure reproduces exactly from its seed.
+**Platform execution matrix (tiers 1–2):** the same test bundles run on every shipping target — macOS native via `swift test` (fast loop + coverage), and per-destination via `xcodebuild test -scheme Stormo-Package` against **iOS Simulator** and **Mac Catalyst** (tvOS/visionOS simulators when installed). This is the pattern used by swift-nio, Apple's own packages, and the major Swift OSS projects: one suite, N destinations, no per-platform test code. Network.framework QUIC works over loopback in the iOS Simulator and Catalyst, so tier 2 runs on all of them without radios. Aspirational tier-1 extension (FoundationDB-style deterministic simulation testing): seeded random command/interleaving exploration against engine invariants — the seed arrives as engine input, so any nightly failure reproduces exactly from its seed.
 
-Module consequence: the engine, typed `Signal` model, and codec live in a dedicated **`PeerMeshProtocol`** target whose only dependency is FlatBuffers; `PeerMesh` (runtime shell + drivers) depends on it — **the shipped `PeerMesh` product includes the QUIC integration**; consumers get working transport out of the box, and the protocol target stays importable on its own for tests and tooling. Under the AI-driven development model (study §4.4) this is the highest-leverage structural decision in the project: it moves the majority of correctness into tier 1, which is agent-buildable and agent-testable with zero device time.
+Module consequence: the engine, typed `Signal` model, and codec live in a dedicated **`StormoProtocol`** target whose only dependency is FlatBuffers; `Stormo` (runtime shell + drivers) depends on it — **the shipped `Stormo` product includes the QUIC integration**; consumers get working transport out of the box, and the protocol target stays importable on its own for tests and tooling. Under the AI-driven development model (study §4.4) this is the highest-leverage structural decision in the project: it moves the majority of correctness into tier 1, which is agent-buildable and agent-testable with zero device time.
 
 ### DD-7: Stream-per-message data plane (MoQ-inspired) — **adopted**
 
@@ -261,13 +261,13 @@ iOS 16+/macOS 13+) recover loss-independence where latency matters.
 
 ### DD-8: Custom session protocol over raw QUIC, not libp2p — **adopted**
 
-The obvious alternative to a bespoke protocol is libp2p (the IPFS-lineage modular P2P stack), especially since PeerMesh convergently shares several of its ideas (key-derived peer IDs, transport abstraction, QUIC). Rejected as the foundation, for recorded reasons:
+The obvious alternative to a bespoke protocol is libp2p (the IPFS-lineage modular P2P stack), especially since Stormo convergently shares several of its ideas (key-derived peer IDs, transport abstraction, QUIC). Rejected as the foundation, for recorded reasons:
 
-1. **No help where help is needed.** PeerMesh's hard problems are Apple-platform-specific — Bonjour over peer-to-peer Wi-Fi, `includePeerToPeer`, Local Network permission UX, AWDL lifecycle, future Wi-Fi Aware. No libp2p transport addresses any of it; adopting libp2p means building that custom transport anyway, inside someone else's abstraction stack.
-2. **Wrong-scale machinery.** DHT discovery, NAT traversal, relays, and gossipsub target internet-scale adversarial networks; PeerMesh sessions are 2–32 co-located consenting devices (§1 scope). The machinery costs dependency surface, binary size, and audit scope without serving a requirement. On QUIC, libp2p's Noise + muxer + multistream-select layering is additionally redundant — QUIC provides encryption, muxing, and streams natively.
+1. **No help where help is needed.** Stormo's hard problems are Apple-platform-specific — Bonjour over peer-to-peer Wi-Fi, `includePeerToPeer`, Local Network permission UX, AWDL lifecycle, future Wi-Fi Aware. No libp2p transport addresses any of it; adopting libp2p means building that custom transport anyway, inside someone else's abstraction stack.
+2. **Wrong-scale machinery.** DHT discovery, NAT traversal, relays, and gossipsub target internet-scale adversarial networks; Stormo sessions are 2–32 co-located consenting devices (§1 scope). The machinery costs dependency surface, binary size, and audit scope without serving a requirement. On QUIC, libp2p's Noise + muxer + multistream-select layering is additionally redundant — QUIC provides encryption, muxing, and streams natively.
 3. **swift-libp2p is not production-viable** (feasibility study §3.1): experimental by its own declaration, pre-1.0, minimal maintainer base, TCP/WebSocket-centric — the Network.framework QUIC transport would still be ours to write.
 4. **The product layer doesn't exist in libp2p:** invitation/consent semantics, rosters, `Progress` resource transfer, and `MPCCompat` are application protocol either way.
-5. **Interop parity:** cross-platform reach via libp2p requires a mutually supported transport, which today means infrastructure LAN — where PeerMesh's QUIC + FlatBuffers wire protocol is equally portable (quiche/Cronet, FlatBuffers Kotlin). The infrastructure-less cross-platform path is blocked by radio availability (C-1/C-2, Wi-Fi Aware version gap), not by protocol choice.
+5. **Interop parity:** cross-platform reach via libp2p requires a mutually supported transport, which today means infrastructure LAN — where Stormo's QUIC + FlatBuffers wire protocol is equally portable (quiche/Cronet, FlatBuffers Kotlin). The infrastructure-less cross-platform path is blocked by radio availability (C-1/C-2, Wi-Fi Aware version gap), not by protocol choice.
 
 **Adopted from libp2p instead:** the PeerID identity encoding (multihash of the encoded public key, CIDv1 text representation) SHALL replace the ad-hoc SHA-256-of-raw-key format before the wire protocol freezes — near-zero cost now, and it keeps a future libp2p bridge (post-1.0 internet reach via relays) identity-compatible. Revisit trigger: if post-1.0 scope expands to internet-wide P2P (NAT traversal/relays), evaluate bridging to libp2p protocols rather than reinventing that tier.
 
@@ -277,11 +277,11 @@ The obvious alternative to a bespoke protocol is libp2p (the IPFS-lineage modula
 
 ```mermaid
 flowchart TD
-    UI["PeerMeshUI<br/>SwiftUI picker, consent sheet<br/>[FR-23]"]
+    UI["StormoUI<br/>SwiftUI picker, consent sheet<br/>[FR-23]"]
     COMPAT["MPCCompat<br/>MCSession-shaped shim, NSStream bridge<br/>[FR-24]"]
-    API["PeerMesh public API<br/>PeerSession · Advertiser · Browser ·<br/>Message · ResourceTransfer · PeerStream"]
+    API["Stormo public API<br/>PeerSession · Advertiser · Browser ·<br/>Message · ResourceTransfer · PeerStream"]
 
-    subgraph PROTO["PeerMeshProtocol — sans-I/O engine [DD-6] (no sockets, no clocks, no async)"]
+    subgraph PROTO["StormoProtocol — sans-I/O engine [DD-6] (no sockets, no clocks, no async)"]
         ENGINE["ProtocolEngine<br/>handle(Input) → [Effect]<br/>invitation · roster · tie-break ·<br/>timers · topology [DD-3]"]
         SIGNAL["Signal model +<br/>FlatBuffers codec + verifier [DD-5]"]
     end
@@ -452,7 +452,7 @@ each self-identified by its first byte (the stream tag):
 |---|---|---|
 | **App messages** — video frames, game state, anything via `send(_:delivery:)`, up to 1 MiB, all delivery modes | the sender's **message channel**: one long-lived stream per direction, framed `StreamHeader` + payload units | `0x02` |
 | **App messages over 1 MiB** (FR-15 allows 16 MB) | a **dedicated stream** per message, retired when spent | `0x01` |
-| **PeerMesh's own protocol** — `PeerHello`, invitations, accept/decline, roster gossip, keepalives, transfer offers, stream-open announcements | the **control stream**: one bidirectional stream, dialer-opened first, total order (DD-5) | `0x00` |
+| **Stormo's own protocol** — `PeerHello`, invitations, accept/decline, roster gossip, keepalives, transfer offers, stream-open announcements | the **control stream**: one bidirectional stream, dialer-opened first, total order (DD-5) | `0x00` |
 | **File transfers** (`sendResource`, FR-17) | offer/accept signals on the control stream; the bytes on a **dedicated stream** per transfer (disk-to-disk, own flow control) | `0x00` + `0x01` |
 | **App byte streams** (`openStream`, FR-18) | a **dedicated stream** each, duplex, app-controlled lifetime | `0x01` |
 
@@ -498,7 +498,7 @@ directions.
 sequenceDiagram
     participant B as Inviter — QUIC/TLS client
     participant A as Advertiser — QUIC/TLS server (NWListener)
-    B->>A: QUIC ClientHello (ALPN peermesh/1)
+    B->>A: QUIC ClientHello (ALPN Stormo/1)
     A->>B: server cert: self-signed P-256 leaf + CertificateRequest (mTLS)
     B->>A: client cert: self-signed P-256 leaf
     Note over B,A: Each side runs the SAME verify block — PKI ignored,<br/>leaf DER → TrustEvaluator with the session TrustPolicy<br/>(.automatic TOFU / .pairingCode / .pinned)

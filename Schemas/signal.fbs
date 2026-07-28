@@ -1,4 +1,4 @@
-// PeerMesh signaling schema (DD-5: disciplined FlatBuffers).
+// Stormo signaling schema (DD-5: disciplined FlatBuffers).
 //
 // DISCIPLINE (normative — see design doc DD-5; enforced by CI):
 //   * Field ids are append-only. Never renumber, retype, or remove a field —
@@ -12,11 +12,11 @@
 //     (64 KB control-message size) — see SignalCodec.
 //
 // Codegen (flatc version pinned in flake.nix):
-//   flatc --swift -o Sources/PeerMesh/Signaling/Generated Schemas/signal.fbs
+//   flatc --swift -o Sources/StormoProtocol/Generated Schemas/*.fbs
 
 include "common.fbs";
 
-namespace PeerMesh.Wire;
+namespace Stormo.Wire;
 
 /// A session member, as carried in rosters (FR-13).
 table PeerInfo {

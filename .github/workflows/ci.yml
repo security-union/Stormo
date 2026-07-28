@@ -46,7 +46,7 @@ jobs:
           QUIC_DEBUG_LOG: /tmp/quic-debug.log
           # Same-machine runs need p2p off (failure mode 10). Peer-to-peer
           # Wi-Fi coverage is tier 3 (hardware lab) by design.
-          PEERMESH_NO_P2P: "1"
+          Stormo_NO_P2P: "1"
       - name: Diagnostics on failure (QUIC log + crash reports)
         if: failure()
         run: |
@@ -70,7 +70,7 @@ jobs:
         run: ./Scripts/e2e-cli.sh
         env:
           QUIC_DEBUG: "1"
-          PEERMESH_NO_P2P: "1"
+          Stormo_NO_P2P: "1"
 
   # Same test bundle per Apple destination. iOS Simulator runs on PRs (the
   # availability-floor check); Mac Catalyst only on pushes to main.
@@ -106,7 +106,7 @@ jobs:
           # xcbeautify streams progress live — a hung xcodebuild shows where
           # it stalled instead of buffering silently until the timeout.
           xcodebuild test \
-            -scheme PeerMesh-Package \
+            -scheme Stormo-Package \
             -destination '${{ steps.dest.outputs.destination }}' \
             | xcbeautify --renderer github-actions
 
@@ -122,7 +122,7 @@ jobs:
         run: |
           set -o pipefail
           xcodebuild test \
-            -scheme PeerMesh-Package \
+            -scheme Stormo-Package \
             -destination 'platform=macOS,variant=Mac Catalyst' \
             | xcbeautify --renderer github-actions
 
@@ -145,7 +145,7 @@ jobs:
       - name: Regenerate and diff
         run: |
           /tmp/flatc-bin/flatc --swift -o /tmp/generated Schemas/*.fbs
-          diff -r /tmp/generated Sources/PeerMeshProtocol/Generated \
+          diff -r /tmp/generated Sources/StormoProtocol/Generated \
             || { echo '::error::Generated sources drifted from schemas (DD-5 rule 4)'; exit 1; }
 
 # TODO(S-6): nightly workflow_dispatch job — stream-churn benchmark and 32-peer

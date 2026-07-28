@@ -1,4 +1,4 @@
-# PeerMesh Implementation Plan
+# Stormo Implementation Plan
 
 **Working plan — SU-2026-WP-001** · Last updated: July 26, 2026
 
@@ -25,13 +25,13 @@ and the full QUIC loopback lifecycle. Three Network.framework platform findings
 recorded in [spike-results.md](spike-results.md) (inbound-stream readiness,
 inbound-connection retention, two-step FIN).
 
-Integration proof: `remote-shutter` branch `feat/peermesh-mpccompat` (compiles + full unit suite green against MPCCompat; functional once Step 4 lands).
+Integration proof: `remote-shutter` branch `feat/Stormo-mpccompat` (compiles + full unit suite green against MPCCompat; functional once Step 4 lands).
 
 ---
 
 ## Step 0 — Scaffolding ✅
 
-Landed: SPM package (`PeerMeshProtocol` / `PeerMesh` / `MPCCompat` / `PeerMeshUI` / `PeerMeshTestKit`); sans-I/O `ProtocolEngine` (DD-6) with invitation/roster/messaging transitions; disciplined zero-copy FlatBuffers signaling (`signal.fbs`, `stream_header.fbs`, `SignalCodec` with verifier caps, DD-5); flake.nix pinning `flatc` = SPM runtime (exact 25.2.10); CI workflow (macOS native + iOS Simulator + Mac Catalyst + codegen-drift job); MPCCompat compile surface validated against a real app (remote-shutter).
+Landed: SPM package (`StormoProtocol` / `Stormo` / `MPCCompat` / `StormoUI` / `StormoTestKit`); sans-I/O `ProtocolEngine` (DD-6) with invitation/roster/messaging transitions; disciplined zero-copy FlatBuffers signaling (`signal.fbs`, `stream_header.fbs`, `SignalCodec` with verifier caps, DD-5); flake.nix pinning `flatc` = SPM runtime (exact 25.2.10); CI workflow (macOS native + iOS Simulator + Mac Catalyst + codegen-drift job); MPCCompat compile surface validated against a real app (remote-shutter).
 
 ## Step 1 — Runtime shell + InMemoryTransport ✅
 
@@ -55,7 +55,7 @@ Everything QUIC needs before a TLS handshake can happen.
 
 The real driver, validated entirely on `127.0.0.1` in CI — no radios.
 
-1. **Listener/advertiser:** `NWListener` with QUIC parameters (ALPN `"peermesh"`, local identity from Step 2) + Bonjour `.service(type:)` with `NWTXTRecord` metadata; `includePeerToPeer = true`; Local Network permission surfacing (FR-4).
+1. **Listener/advertiser:** `NWListener` with QUIC parameters (ALPN `"Stormo"`, local identity from Step 2) + Bonjour `.service(type:)` with `NWTXTRecord` metadata; `includePeerToPeer = true`; Local Network permission surfacing (FR-4).
 2. **Browser:** `NWBrowser(.bonjourWithTXTRecord)`, cross-interface dedup by peer id (FR-2).
 3. **Connection = QUIC multiplex:** resolve **Spike S-3** (`NWMultiplexGroup` vs per-stream `NWConnection`s) empirically on loopback; control stream (signals, size-prefixed) + stream-per-message with `StreamHeader` (DD-7) + datagram flow for `.datagram` (RFC 9221).
 4. **Benchmark = Spike S-6:** stream-churn rate (target ≥1,000 msg/s loopback, flat memory) wired as the nightly CI job stub in `ci.yml`.
@@ -69,9 +69,9 @@ The real driver, validated entirely on `127.0.0.1` in CI — no radios.
 2. **Resource transfer (FR-17):** `TransferOffer` signal + `transferChunk` stream; disk-to-disk, `Progress`, cancellation via stream reset; memory cap per QA-3.
 3. **App byte streams (FR-18):** `StreamOpen` + `PeerByteStream` over dedicated streams.
 4. **MPCCompat bridge:** pump `PeerSession` membership/messages/resources into `MultipeerSessionDelegate` callbacks (serial delegate queue, MCSession semantics); `NearbyServiceAdvertiser/Browser` bridging; `MultipeerSession.send/sendResource` wired (`.reliable`→`.reliableOrdered`, `.unreliable`→`.datagram`).
-5. **Validation:** remote-shutter `feat/peermesh-mpccompat` runs camera↔monitor over LAN (simulator loopback first, then two Macs/devices on one network); its loopback session tests pass against the bridge over InMemoryTransport.
+5. **Validation:** remote-shutter `feat/Stormo-mpccompat` runs camera↔monitor over LAN (simulator loopback first, then two Macs/devices on one network); its loopback session tests pass against the bridge over InMemoryTransport.
 
-**Exit criteria:** remote-shutter takes a photo through PeerMesh on LAN; MPCCompat E2E tests in PeerMesh repo green over both transports.
+**Exit criteria:** remote-shutter takes a photo through Stormo on LAN; MPCCompat E2E tests in Stormo repo green over both transports.
 
 ## Step 5 — Hardware spikes ⬜ (requires operator + ≥2 physical devices)
 
@@ -84,13 +84,13 @@ The real driver, validated entirely on `127.0.0.1` in CI — no radios.
 
 ## Step 6 — Release engineering ⬜
 
-Initial public commit + tag `0.1.0`; license decision (MIT vs Apache-2.0 — study §8 leans Apache for the patent grant); repo description/topics + Swift Package Index submission; hosted DocC + `llms.txt`; "Migrating from MultipeerConnectivity to PeerMesh" guide (the TN3213-echo landing page); name availability final check (`PeerMesh` verified clear Jul 26); threat-model document (security-consultancy differentiator, study §8.3).
+Initial public commit + tag `0.1.0`; license decision (MIT vs Apache-2.0 — study §8 leans Apache for the patent grant); repo description/topics + Swift Package Index submission; hosted DocC + `llms.txt`; "Migrating from MultipeerConnectivity to Stormo" guide (the TN3213-echo landing page); name availability final check (`Stormo` verified clear Jul 26); threat-model document (security-consultancy differentiator, study §8.3).
 
 ---
 
 ## Standing constraints (from design doc)
 
-- Engine stays sans-I/O: no sockets/clocks/async in `PeerMeshProtocol` (DD-6).
+- Engine stays sans-I/O: no sockets/clocks/async in `StormoProtocol` (DD-6).
 - FlatBuffers discipline: schema evolution rules + verifier caps + pinned-together flatc/runtime (DD-5).
 - One suite, N transports/platforms: new features land with engine tests first, driver parity second (QA-8).
 - No Bluetooth claims, ever (C-2); no private API (C-6).
