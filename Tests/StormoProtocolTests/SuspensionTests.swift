@@ -84,15 +84,12 @@ struct SuspensionTests {
         #expect(closed == [.emit(.peerLeft(bob))])
     }
 
-    @Test("Local suspend announces to connected members and arms local grace")
+    @Test("Local suspend announces and marks — no timers on a process about to freeze")
     func localSuspendAnnounces() {
         var engine = engineWithMember(alice, member: bob)
 
         let effects = engine.handle(.command(.suspend(grace: 60)))
-        #expect(effects == [
-            .sendSignal(.suspend(graceMs: 60_000), to: bob),
-            .startTimer(.suspension(bob), duration: 60),
-        ])
+        #expect(effects == [.sendSignal(.suspend(graceMs: 60_000), to: bob)])
 
         // Our own connection losses while frozen must not evict members.
         _ = engine.handle(.connectionClosed(bob))
@@ -105,10 +102,13 @@ struct SuspensionTests {
         _ = engine.handle(.command(.suspend(grace: 60)))
         _ = engine.handle(.connectionClosed(bob))
 
+        // Wake-up arms both clocks: the fixed-rate re-dial and the grace,
+        // which runs from NOW (the frozen process never ran timers).
         let effects = engine.handle(.command(.resume))
         #expect(effects == [
             .connect(to: bob),
             .startTimer(.resumeRetry(bob), duration: 1),
+            .startTimer(.suspension(bob), duration: 60),
         ])
 
         // The re-dial completing resumes the member and stops the loop.
@@ -167,8 +167,8 @@ struct SuspensionTests {
         var engine = engineWithMember(alice, member: bob)
         _ = engine.handle(.command(.suspend(grace: 60)))
 
-        // No close happened (short background): no re-dial, just cleanup.
-        #expect(engine.handle(.command(.resume)) == [.cancelTimer(.suspension(bob))])
+        // No close happened (short background): the mark just sheds.
+        #expect(engine.handle(.command(.resume)) == [])
         #expect(engine.members.contains(bob))
 
         // A genuine close after that is a real departure again.

@@ -132,6 +132,9 @@ public struct ProtocolEngine: Sendable {
     // Members under a suspension grace window (C-5); cleared by reconnect or
     // by the suspension timer turning them into departures.
     private var suspended: Set<PeerID> = []
+    // The clamped grace announced by OUR `.suspend`, consumed by `.resume` to
+    // arm grace timers at wake — the frozen side never runs timers.
+    private var localSuspensionGrace: TimeInterval?
 
     public init(localPeer: PeerID, configuration: Configuration = Configuration()) {
         self.localPeer = localPeer
@@ -287,15 +290,19 @@ public struct ProtocolEngine: Sendable {
             pendingOutgoing.removeAll()
             pendingIncoming.removeAll()
             suspended.removeAll()  // stale suspension timers no-op on fire
+            localSuspensionGrace = nil
             return open
                 .sorted { $0.keyHash.lexicographicallyPrecedes($1.keyHash) }
                 .map { .closeConnection($0) }
 
         case .suspend(let grace):
-            // Mark ALL members suspended locally: our own connection-closed
-            // inputs (now or queued until thaw) must not evict them before
-            // `.resume` can re-dial.
+            // Mark ALL members suspended and say goodbye — nothing else. The
+            // process is about to freeze, so NO timers arm here: the marks
+            // keep queued connection-closed inputs from evicting members, and
+            // `.resume` (the next time our code provably runs) starts the
+            // grace clock.
             let duration = min(grace, configuration.maxSuspensionGrace)
+            localSuspensionGrace = duration
             let signal = Signal.suspend(graceMs: UInt64(duration * 1000))
             var effects: [Effect] = []
             for member in members.sorted(by: { $0.keyHash.lexicographicallyPrecedes($1.keyHash) }) {
@@ -303,14 +310,15 @@ public struct ProtocolEngine: Sendable {
                 if connections.contains(member) {
                     effects.append(.sendSignal(signal, to: member))
                 }
-                effects.append(.startTimer(.suspension(member), duration: duration))
             }
             return effects
 
         case .resume:
-            // Re-dial suspended members with dead links at a fixed rate
-            // (resumeRetry ticks; the loop ends on reconnect or grace
-            // expiry); live links just shed their suspension.
+            // Wake-up: re-dial suspended members with dead links at a fixed
+            // rate, bounded by a grace timer that starts NOW (grace runs from
+            // wake, not from the announce); live links just shed their marks.
+            let grace = localSuspensionGrace ?? configuration.maxSuspensionGrace
+            localSuspensionGrace = nil
             var effects: [Effect] = []
             let marked = members
                 .filter(suspended.contains)
@@ -318,11 +326,11 @@ public struct ProtocolEngine: Sendable {
             for member in marked {
                 if connections.contains(member) {
                     suspended.remove(member)
-                    effects.append(.cancelTimer(.suspension(member)))
                 } else {
                     effects.append(.connect(to: member))
                     effects.append(.startTimer(
                         .resumeRetry(member), duration: configuration.resumeRetryInterval))
+                    effects.append(.startTimer(.suspension(member), duration: grace))
                 }
             }
             return effects
