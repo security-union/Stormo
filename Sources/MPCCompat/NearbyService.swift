@@ -126,11 +126,16 @@ public final class NearbyServiceBrowser: @unchecked Sendable {
 }
 
 public protocol NearbyServiceBrowserDelegate: AnyObject {
+    /// May fire MORE THAN ONCE per peer (delta from MC): AWDL finds carry a
+    /// placeholder displayName until TXT enrichment re-delivers the real one,
+    /// and PeerID equality is key-hash-only — callers keeping a peer list
+    /// must update the stored value in place, never dedup-and-drop.
     func browser(
         _ browser: NearbyServiceBrowser,
         foundPeer peerID: PeerID,
         withDiscoveryInfo info: [String: String]?
     )
+    /// Carries the same enriched `PeerID` that `foundPeer` delivered.
     func browser(_ browser: NearbyServiceBrowser, lostPeer peerID: PeerID)
     func browser(_ browser: NearbyServiceBrowser, didNotStartBrowsingForPeers error: Error)
 }

@@ -74,10 +74,15 @@ public final class QUICTransport: PeerTransport, @unchecked Sendable {
     /// system load.
     private let queue = DispatchQueue(label: "dev.securityunion.stormo.quic", qos: .userInitiated)
 
-    // Advertiser state.
-    private let listenerBox = Locked<NWListener?>(nil)
-    private let listenerIdentity = Locked<QUICLocalIdentity?>(nil)
-    private let advertisedPeer = Locked<PeerID?>(nil)
+    // Advertiser state: listener + TLS identity + peer swap as ONE unit, so
+    // no start/stop ordering can strand a live listener (ghost Bonjour
+    // record) or dispose an identity a live listener still uses.
+    private struct Advertising {
+        let listener: NWListener
+        let identity: QUICLocalIdentity
+        let peer: PeerID
+    }
+    private let advertising = Locked<Advertising?>(nil)
 
     // Browser state + the per-transport endpoint registry (item 2): browse
     // results (Bonjour TXT or rendezvous) → endpoints, keyed by PeerID, so
@@ -85,7 +90,6 @@ public final class QUICTransport: PeerTransport, @unchecked Sendable {
     private let browserBox = Locked<NWBrowser?>(nil)
     private let txtBrowserBox = Locked<NWBrowser?>(nil)
     private let endpoints = Locked<[PeerID: NWEndpoint]>([:])
-    private let seenPeers = Locked<Set<PeerID>>([])
 
     public init(configuration: Configuration = Configuration()) {
         self.configuration = configuration
@@ -148,7 +152,6 @@ public final class QUICTransport: PeerTransport, @unchecked Sendable {
         identity: PeerIdentity
     ) async throws {
         let localIdentity = try makeLocalIdentity(for: identity)
-        listenerIdentity.value = localIdentity
 
         let params = QUICTLS.parameters(localIdentity: localIdentity, trust: .automatic, isListener: true)
         // Peer-to-peer Wi-Fi (FR-3) is a Bonjour/AWDL concern; enabling it on the
@@ -182,22 +185,40 @@ public final class QUICTransport: PeerTransport, @unchecked Sendable {
             }
         }
 
-        listenerBox.value = listener
-        advertisedPeer.value = localPeer
+        // Publish-by-swap: the newest call owns the slot; the displaced unit
+        // is retired exactly once.
+        let next = Advertising(listener: listener, identity: localIdentity, peer: localPeer)
+        let displaced = advertising.withLock { state -> Advertising? in
+            let old = state
+            state = next
+            return old
+        }
+        displaced?.listener.cancel()
+        displaced?.identity.dispose()
 
-        try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Void, Error>) in
-            let done = Locked(false)
-            listener.stateUpdateHandler = { state in
-                switch state {
-                case .ready:
-                    if done.compareAndSet(expected: false, new: true) { cont.resume() }
-                case .failed(let error):
-                    if done.compareAndSet(expected: false, new: true) { cont.resume(throwing: error) }
-                default:
-                    break
+        do {
+            try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Void, Error>) in
+                let done = Locked(false)
+                listener.stateUpdateHandler = { state in
+                    switch state {
+                    case .ready:
+                        if done.compareAndSet(expected: false, new: true) { cont.resume() }
+                    case .failed(let error):
+                        if done.compareAndSet(expected: false, new: true) { cont.resume(throwing: error) }
+                    default:
+                        break
+                    }
                 }
+                listener.start(queue: queue)
             }
-            listener.start(queue: queue)
+        } catch {
+            // Unpublish unless something newer already displaced us.
+            advertising.withLock { state in
+                if state?.listener === listener { state = nil }
+            }
+            listener.cancel()
+            localIdentity.dispose()
+            throw error
         }
 
         // Register the bound endpoint for the direct-endpoint path.
@@ -209,14 +230,16 @@ public final class QUICTransport: PeerTransport, @unchecked Sendable {
     }
 
     public func stopAdvertising() async {
-        listenerBox.value?.cancel()
-        listenerBox.value = nil
-        if let peer = advertisedPeer.value, case .rendezvous(let rendezvous) = configuration.discovery {
+        let displaced = advertising.withLock { state -> Advertising? in
+            let old = state
+            state = nil
+            return old
+        }
+        displaced?.listener.cancel()
+        if let peer = displaced?.peer, case .rendezvous(let rendezvous) = configuration.discovery {
             await rendezvous.withdraw(peer)
         }
-        advertisedPeer.value = nil
-        listenerIdentity.value?.dispose()
-        listenerIdentity.value = nil
+        displaced?.identity.dispose()
     }
 
     // MARK: Browsing (FR-2, FR-5)
@@ -244,7 +267,9 @@ public final class QUICTransport: PeerTransport, @unchecked Sendable {
     private func bonjourDiscoveries(service: ServiceDescriptor) -> AsyncStream<DiscoveryEvent> {
         let (stream, continuation) = AsyncStream<DiscoveryEvent>.makeStream()
         let endpoints = self.endpoints
-        let seen = self.seenPeers
+        // Dedup state is PER browse session, like `enriched`: a restarted
+        // browse must re-emit `.found` for peers still advertising.
+        let seen = Locked<Set<PeerID>>([])
         let enriched = Locked<Set<PeerID>>([])
         let livePlain = Locked<Set<PeerID>>([])
         let liveTXT = Locked<Set<PeerID>>([])
