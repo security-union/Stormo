@@ -11,6 +11,7 @@ public typealias WireCodeConfirm = Stormo_Wire_CodeConfirm
 public typealias WireRosterUpdate = Stormo_Wire_RosterUpdate
 public typealias WireTransferOffer = Stormo_Wire_TransferOffer
 public typealias WireStreamOpen = Stormo_Wire_StreamOpen
+public typealias WireSuspend = Stormo_Wire_Suspend
 public typealias WireTransferId = Stormo_Wire_TransferId
 
 /// A control-plane message: a verified FlatBuffers buffer read **in place**
@@ -62,6 +63,7 @@ public struct Signal: @unchecked Sendable, Equatable {
         case rosterUpdate(WireRosterUpdate)
         case transferOffer(WireTransferOffer)
         case streamOpen(WireStreamOpen)
+        case suspend(WireSuspend)
         /// Absent or unrecognized union variant (forward compatibility, QA-11):
         /// ignored-and-logged, never fatal (DD-5 rule 1).
         case unrecognized
@@ -81,6 +83,8 @@ public struct Signal: @unchecked Sendable, Equatable {
             return root.body(type: WireTransferOffer.self).map(Body.transferOffer) ?? .unrecognized
         case .streamopen:
             return root.body(type: WireStreamOpen.self).map(Body.streamOpen) ?? .unrecognized
+        case .suspend:
+            return root.body(type: WireSuspend.self).map(Body.suspend) ?? .unrecognized
         case .none_:
             return .unrecognized
         }
@@ -133,6 +137,12 @@ public struct Signal: @unchecked Sendable, Equatable {
         build(.streamopen) { fbb in
             let labelOffset = fbb.create(string: label)
             return WireStreamOpen.createStreamOpen(&fbb, labelOffset: labelOffset)
+        }
+    }
+
+    public static func suspend(graceMs: UInt64) -> Signal {
+        build(.suspend) { fbb in
+            WireSuspend.createSuspend(&fbb, graceMs: graceMs)
         }
     }
 

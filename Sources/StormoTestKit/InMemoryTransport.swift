@@ -187,6 +187,11 @@ final class InMemoryConnection: PeerConnection, @unchecked Sendable {
             partner.ownContinuation.finish()
             partner.incomingStreamsContinuation.finish()
         }
+        // Driver contract (matches QUICConnection): BOTH ends observe an
+        // explicit `.closed` event, including the side that initiated the
+        // close — a transport-level kill must update the killer's own session
+        // bookkeeping too, or a later resume re-dial thinks the link is alive.
+        ownContinuation.yield(.closed)
         ownContinuation.finish()
         incomingStreamsContinuation.finish()
         partnerBox.value = nil

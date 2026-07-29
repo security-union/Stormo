@@ -223,6 +223,23 @@ public final class MultipeerSession: @unchecked Sendable {
         _connectedPeers.removeAll()
         stateLock.unlock()
     }
+
+    // MARK: Background suspension (C-5 — no MCSession analog)
+
+    /// Announce that this app is about to be suspended (call from
+    /// `didEnterBackground`). Connected peers keep this device `.connected`
+    /// for the grace period instead of dropping it ~5 s after the freeze;
+    /// pair with ``resumeFromSuspension()`` on foreground. Beyond-MC API: MC
+    /// survived backgrounding at the OS level, a userspace transport cannot.
+    public func announceSuspension(gracePeriod: TimeInterval = 60) {
+        core?.announceSuspension(gracePeriod: gracePeriod)
+    }
+
+    /// Re-establish connections suspended while the app was frozen (call
+    /// from `didBecomeActive`).
+    public func resumeFromSuspension() {
+        core?.resumeSession()
+    }
 }
 
 extension PeerID {
