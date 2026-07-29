@@ -52,13 +52,10 @@ final class CompatCore: @unchecked Sendable {
     weak var advertiser: NearbyServiceAdvertiser?
     weak var browser: NearbyServiceBrowser?
 
-    /// MC's lifecycle calls (`startAdvertisingPeer`, `stopBrowsingForPeers`, …)
-    /// are synchronous and implicitly ordered. The bridge into the async
-    /// `PeerSession` actor must preserve that order: unstructured `Task`s are
-    /// unordered and the actor is reentrant at await points, so back-to-back
-    /// `stop(); start()` (remote-shutter's scanning screen revisit) could
-    /// invert or overlap — stranding a live radio, or ending up with none.
-    /// Every lifecycle op therefore chains behind the previous one.
+    /// MC's lifecycle calls are synchronous and implicitly ordered; the async
+    /// bridge must preserve that order (unstructured Tasks are unordered, and
+    /// `stop(); start()` inverting strands a radio — or leaves none). Every
+    /// lifecycle op chains behind the previous one.
     private let opLock = NSLock()
     private var opTail: Task<Void, Never>?
 
@@ -236,10 +233,9 @@ final class CompatCore: @unchecked Sendable {
 
     private func handleDiscovery(_ event: DiscoveryEvent) {
         // Record the endpoint before notifying, so a delegate that immediately
-        // calls invitePeer(_:) finds it. For `.lost`, recover the peer we
-        // surfaced via `foundPeer` — MC hands the delegate the SAME MCPeerID
-        // both times, whereas the transport's `.lost` may carry the name-only
-        // placeholder from the AWDL find (PeerID equality is key-hash-only).
+        // calls invitePeer(_:) finds it. `.lost` delivers the same enriched
+        // PeerID `foundPeer` did (MC parity) — the transport's may carry the
+        // AWDL name-only placeholder.
         lock.lock()
         let departed: PeerID?
         switch event {

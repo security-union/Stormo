@@ -296,10 +296,8 @@ struct MPCCompatE2ETests {
 
 #if os(macOS)
 extension MPCCompatE2ETests {
-    /// Bounded wait for the first stream element matching `predicate`.
-    /// Reconnect regressions hang forever (the awaited callback simply never
-    /// fires), so repro tests need a deadline that FAILS instead of wedging
-    /// the suite until the CI job cap.
+    /// Bounded wait for the first matching stream element — reconnect
+    /// regressions never fire the awaited callback, so fail instead of hang.
     private func first<T: Sendable>(
         of stream: AsyncStream<T>,
         within seconds: TimeInterval,
@@ -382,15 +380,10 @@ extension MPCCompatE2ETests {
         browser.stopBrowsingForPeers()
     }
 
-    /// Remote-shutter's OTHER retry pattern — the one `reinviteAfterDisconnectOverQUIC`
-    /// deliberately does not cover: the monitor returns to the scanning screen and
-    /// restarts discovery on the SAME core objects (`stopBrowsingForPeers()` +
-    /// `startBrowsingForPeers()` back to back, `MultipeerService.startBrowsingOnly`).
-    /// Real MC re-fires `foundPeer` for every peer still advertising; the field
-    /// regression was that transport-lifetime browse dedup swallowed the re-find,
-    /// so the scanner stayed empty forever. The camera's advertiser deliberately
-    /// keeps running across the restart: a Bonjour record flap would evict the
-    /// peer from the dedup set by luck of timing and mask the bug.
+    /// Scanning-screen revisit: stop+start browsing on the same objects must
+    /// re-find a still-advertising peer (regression: browse dedup swallowed
+    /// the re-find). The advertiser deliberately keeps running — a record
+    /// flap would evict the dedup entry and mask the bug.
     @Test("Rescan after disconnect re-finds and reconnects (scanning-screen revisit)")
     func rescanAfterDisconnectOverQUIC() async throws {
         setenv("STORMO_NO_P2P", "1", 1)
@@ -419,31 +412,23 @@ extension MPCCompatE2ETests {
         browser.delegate = browserDelegate
         browser.startBrowsingForPeers()
 
-        // Round 1: find, invite, connect. (Match by displayName: the local
-        // `peerA` handle does not share the advertiser's persisted key hash,
-        // and PeerID equality is key-hash-only.)
+        // Match by displayName: the local `peerA` handle does not share the
+        // advertiser's persisted key hash.
         let round1 = await first(of: browserDelegate.found, within: 15) { $0.0.displayName == "RescanCam" }
         let target = try #require(round1?.0, "round 1 must discover the camera")
         browser.invitePeer(target, to: sessionB, withContext: nil, timeout: 25)
         #expect(await firstState(recorderB, matching: .connected) != nil, "round 1 must connect")
 
-        // Disconnect: the camera observes the departure, both screens pop back
-        // to scanning.
         sessionB.disconnect()
         #expect(await firstState(recorderA, matching: .notConnected) != nil,
                 "camera must observe the departure")
 
-        // Scanning-screen revisit on the monitor, app-exact
-        // (MultipeerService.startBrowsingOnly). The camera keeps advertising.
         browser.stopBrowsingForPeers()
         browser.startBrowsingForPeers()
 
-        // Real-MC parity: the restarted browse must re-surface the still-
-        // advertising camera...
         let refound = await first(of: browserDelegate.found, within: 15) { $0.0.displayName == "RescanCam" }
         #expect(refound != nil, "restarted browse must re-find the advertising camera")
 
-        // ...and a fresh invite must connect (the full user-visible recovery).
         browser.invitePeer(target, to: sessionB, withContext: nil, timeout: 25)
         #expect(await firstState(recorderB, matching: .connected) != nil,
                 "round 2 must reconnect after the rescan")
@@ -454,13 +439,9 @@ extension MPCCompatE2ETests {
         browser.stopBrowsingForPeers()
     }
 
-    /// The camera-side half of the stuck-rescan field bug: the CAMERA returns
-    /// to its advertising screen and cycles its advertiser, app-exact
-    /// (`MultipeerService.startAdvertisingOnly(discoveryInfo:)`:
-    /// `stopAdvertisingPeer()`, a NEW compat advertiser on the same core,
-    /// `startAdvertisingPeer()` — no awaits between them). The monitor keeps
-    /// browsing and re-invites. In the field every connect failed until the
-    /// camera left the screen entirely (full teardown) and advertised fresh.
+    /// Camera-side revisit: stop, NEW compat advertiser on the same core,
+    /// start (no awaits between) — then a re-invite accepted with freshly
+    /// rebuilt sessions on both sides must connect.
     @Test("Camera re-advertise cycle after disconnect accepts a new invite")
     func cameraReadvertiseAfterDisconnectOverQUIC() async throws {
         setenv("STORMO_NO_P2P", "1", 1)
@@ -489,7 +470,6 @@ extension MPCCompatE2ETests {
         browser.delegate = browserDelegate
         browser.startBrowsingForPeers()
 
-        // Round 1: find, invite, connect, then disconnect.
         let round1 = await first(of: browserDelegate.found, within: 15) { $0.0.displayName == "ReadvCam" }
         let target = try #require(round1?.0, "round 1 must discover the camera")
         browser.invitePeer(target, to: sessionB, withContext: nil, timeout: 25)
@@ -498,16 +478,12 @@ extension MPCCompatE2ETests {
         #expect(await firstState(recorderA, matching: .notConnected) != nil,
                 "camera must observe the departure")
 
-        // Camera scanning-screen revisit, app-exact: stop, NEW advertiser
-        // resolving the same core, start — synchronous, back to back.
         advertiser.stopAdvertisingPeer()
         advertiser = NearbyServiceAdvertiser(
             peer: peerA, discoveryInfo: ["role": "camera"], serviceType: service)
         advertiser.startAdvertisingPeer()
 
-        // App-exact rebuildSessionIfIdle on BOTH sides: fresh MCSessions for
-        // round 2 (the camera accepts with a virgin session, the monitor
-        // invites with one).
+        // rebuildSessionIfIdle on both sides: round 2 uses fresh MCSessions.
         let sessionA2 = MultipeerSession(peer: peerA, service: service)
         let recorderA2 = SessionRecorder()
         sessionA2.delegate = recorderA2
@@ -518,9 +494,6 @@ extension MPCCompatE2ETests {
         let recorderB2 = SessionRecorder()
         sessionB2.delegate = recorderB2
 
-        // The monitor (still browsing) re-invites: the cycled camera must
-        // accept and reach .connected — the user-visible recovery that failed
-        // in the field until the camera was torn down completely.
         browser.invitePeer(target, to: sessionB2, withContext: nil, timeout: 25)
         #expect(await firstState(recorderB2, matching: .connected) != nil,
                 "re-invite after the camera's advertiser cycle must connect")
@@ -531,11 +504,9 @@ extension MPCCompatE2ETests {
         browser.stopBrowsingForPeers()
     }
 
-    /// A repeated `startAdvertisingPeer()` (no stop in between) must not leak
-    /// the previous NWListener. The regression: `startAdvertising` overwrote
-    /// the listener box without cancelling the old listener, so the orphaned
-    /// listener kept the Bonjour record registered after `stopAdvertisingPeer()`
-    /// — a ghost camera that browsers keep finding but that can never accept.
+    /// Repeated `startAdvertisingPeer()` must not leak the previous listener:
+    /// an orphaned listener keeps its Bonjour record registered after stop —
+    /// a ghost peer browsers keep finding but that can never accept.
     @Test("Double start then stop leaves no ghost advertiser")
     func advertiserRestartLeavesNoGhostListener() async throws {
         setenv("STORMO_NO_P2P", "1", 1)
@@ -560,10 +531,8 @@ extension MPCCompatE2ETests {
         let found = await first(of: browserDelegate.found, within: 15) { $0.0.displayName == "GhostCam" }
         let ghostID = try #require(found?.0, "advertiser must be discoverable before the stop")
 
-        // One stop must fully withdraw the record — the browser sees the peer
-        // go away (matched by identity: PeerID equality is key-hash-only, and
-        // MC parity means lostPeer carries the same peer foundPeer delivered).
-        // With a leaked first listener the record never disappears.
+        // One stop must fully withdraw the record; with a leaked first
+        // listener it never disappears.
         advertiser.stopAdvertisingPeer()
         let lost = await first(of: browserDelegate.lost, within: 15) { $0 == ghostID }
         #expect(lost != nil, "stopAdvertisingPeer must withdraw the Bonjour record")

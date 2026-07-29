@@ -74,12 +74,9 @@ public final class QUICTransport: PeerTransport, @unchecked Sendable {
     /// system load.
     private let queue = DispatchQueue(label: "dev.securityunion.stormo.quic", qos: .userInitiated)
 
-    // Advertiser state: the listener, its TLS identity, and the advertised
-    // peer live and die as ONE unit behind one lock. Repeated or concurrent
-    // `startAdvertising` calls swap the whole unit — the displaced listener is
-    // cancelled and its identity disposed by whoever displaced it, so no call
-    // ordering can strand a live listener (a ghost Bonjour record that
-    // browsers keep finding) or dispose an identity a live listener still uses.
+    // Advertiser state: listener + TLS identity + peer swap as ONE unit, so
+    // no start/stop ordering can strand a live listener (ghost Bonjour
+    // record) or dispose an identity a live listener still uses.
     private struct Advertising {
         let listener: NWListener
         let identity: QUICLocalIdentity
@@ -188,8 +185,8 @@ public final class QUICTransport: PeerTransport, @unchecked Sendable {
             }
         }
 
-        // Publish-by-swap: the newest call owns the slot; whatever it displaced
-        // is retired here, exactly once.
+        // Publish-by-swap: the newest call owns the slot; the displaced unit
+        // is retired exactly once.
         let next = Advertising(listener: listener, identity: localIdentity, peer: localPeer)
         let displaced = advertising.withLock { state -> Advertising? in
             let old = state
@@ -215,8 +212,7 @@ public final class QUICTransport: PeerTransport, @unchecked Sendable {
                 listener.start(queue: queue)
             }
         } catch {
-            // Unpublish (unless something newer already displaced us) and
-            // retire our own pair.
+            // Unpublish unless something newer already displaced us.
             advertising.withLock { state in
                 if state?.listener === listener { state = nil }
             }
@@ -271,10 +267,8 @@ public final class QUICTransport: PeerTransport, @unchecked Sendable {
     private func bonjourDiscoveries(service: ServiceDescriptor) -> AsyncStream<DiscoveryEvent> {
         let (stream, continuation) = AsyncStream<DiscoveryEvent>.makeStream()
         let endpoints = self.endpoints
-        // Dedup state is PER browse session, like `enriched` below: a restarted
-        // browse must re-emit `.found` for every peer still advertising (MC
-        // parity — remote-shutter's scanning screen restarts browsing on each
-        // revisit, and over AWDL the plain browse is the only source of finds).
+        // Dedup state is PER browse session, like `enriched`: a restarted
+        // browse must re-emit `.found` for peers still advertising.
         let seen = Locked<Set<PeerID>>([])
         let enriched = Locked<Set<PeerID>>([])
         let livePlain = Locked<Set<PeerID>>([])

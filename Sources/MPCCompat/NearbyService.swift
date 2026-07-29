@@ -126,21 +126,16 @@ public final class NearbyServiceBrowser: @unchecked Sendable {
 }
 
 public protocol NearbyServiceBrowserDelegate: AnyObject {
-    /// May fire MORE THAN ONCE for the same peer — a behavioral delta from
-    /// MC. Over AWDL a peer is first surfaced from a name-only Bonjour find,
-    /// whose `PeerID.displayName` is a key-hash-prefix placeholder ("Qm3f9a2c…");
-    /// when TXT enrichment resolves, the peer is re-delivered with the real
-    /// display name and discovery info. `PeerID` equality is key-hash-only, so
-    /// both deliveries compare equal: callers keeping a peer list must UPDATE
-    /// the stored value in place on a re-find, never dedup-and-drop it —
-    /// dropping freezes the placeholder name in the UI forever.
+    /// May fire MORE THAN ONCE per peer (delta from MC): AWDL finds carry a
+    /// placeholder displayName until TXT enrichment re-delivers the real one,
+    /// and PeerID equality is key-hash-only — callers keeping a peer list
+    /// must update the stored value in place, never dedup-and-drop.
     func browser(
         _ browser: NearbyServiceBrowser,
         foundPeer peerID: PeerID,
         withDiscoveryInfo info: [String: String]?
     )
-    /// Carries the same enriched `PeerID` that `foundPeer` delivered (MC
-    /// hands back the identical `MCPeerID` both times).
+    /// Carries the same enriched `PeerID` that `foundPeer` delivered.
     func browser(_ browser: NearbyServiceBrowser, lostPeer peerID: PeerID)
     func browser(_ browser: NearbyServiceBrowser, didNotStartBrowsingForPeers error: Error)
 }
