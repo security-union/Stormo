@@ -210,7 +210,9 @@ public struct ProtocolEngine: Sendable {
             // a short background can end without the link dropping, and the
             // observer side has no resume trigger, only this timer.
             guard suspended.remove(peer) != nil else { return [] }
-            if connections.contains(peer) { return [] }
+            // Link alive: the peer never actually went away (or its Resume was
+            // lost). Report it back, never leave the app waiting.
+            if connections.contains(peer) { return [.emit(.peerResumed(peer))] }
             guard members.remove(peer) != nil else { return [] }
             return [
                 .cancelTimer(.resumeRetry(peer)),
@@ -325,7 +327,11 @@ public struct ProtocolEngine: Sendable {
                 .sorted { $0.keyHash.lexicographicallyPrecedes($1.keyHash) }
             for member in marked {
                 if connections.contains(member) {
+                    // The link survived the freeze, so there is no reconnect
+                    // for the peer to observe — say so explicitly or it waits
+                    // forever.
                     suspended.remove(member)
+                    effects.append(.sendSignal(.resume(), to: member))
                 } else {
                     effects.append(.connect(to: member))
                     effects.append(.startTimer(
@@ -412,6 +418,15 @@ public struct ProtocolEngine: Sendable {
             return [
                 .startTimer(.suspension(peer), duration: duration),
                 .emit(.peerSuspended(peer)),
+            ]
+
+        case .resume:
+            // Only meaningful for a member we are holding under grace.
+            guard members.contains(peer), suspended.remove(peer) != nil else { return [] }
+            return [
+                .cancelTimer(.suspension(peer)),
+                .cancelTimer(.resumeRetry(peer)),
+                .emit(.peerResumed(peer)),
             ]
 
         case .unrecognized:

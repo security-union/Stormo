@@ -162,28 +162,29 @@ struct SuspensionTests {
         #expect(engine2.handle(.timerFired(.resumeRetry(bob))) == [])
     }
 
-    @Test("Resume with the connection still alive sheds the suspension in place")
+    @Test("Resume on a surviving link ANNOUNCES — the peer has no reconnect to see")
     func resumeWithLiveConnection() {
         var engine = engineWithMember(alice, member: bob)
         _ = engine.handle(.command(.suspend(grace: 60)))
 
-        // No close happened (short background): the mark just sheds.
-        #expect(engine.handle(.command(.resume)) == [])
+        // No close happened (short background). The peer is holding us under
+        // grace and will never observe a reconnect, so say we are back.
+        #expect(engine.handle(.command(.resume)) == [.sendSignal(.resume(), to: bob)])
         #expect(engine.members.contains(bob))
 
         // A genuine close after that is a real departure again.
         #expect(engine.handle(.connectionClosed(bob)) == [.emit(.peerLeft(bob))])
     }
 
-    @Test("Grace expiry never evicts a member whose connection is alive")
-    func expiryWithLiveConnectionIsNoop() {
+    @Test("Grace expiry on a live link resumes the member, never departs it")
+    func expiryWithLiveConnectionResumes() {
         var engine = engineWithMember(alice, member: bob)
         _ = engine.handle(.signal(.suspend(graceMs: 30_000), from: bob))
 
-        // The link never dropped (short background) and the suspender has no
-        // resume trigger to send — only this timer runs. It must not depart
-        // a live member.
-        #expect(engine.handle(.timerFired(.suspension(bob))) == [])
+        // The link never dropped and the Resume never arrived (lost, or the
+        // peer never called resume). Expiry must free the app from waiting,
+        // not depart a member we are demonstrably connected to.
+        #expect(engine.handle(.timerFired(.suspension(bob))) == [.emit(.peerResumed(bob))])
         #expect(engine.members.contains(bob))
 
         // Suspension shed: the next close is a normal departure.
@@ -214,6 +215,23 @@ struct SuspensionTests {
         _ = engine.handle(.command(.leave))
         #expect(engine.handle(.timerFired(.suspension(bob))) == [])
         #expect(engine.members.isEmpty)
+    }
+
+    @Test("Resume signal clears a grace hold on a link that never dropped")
+    func inboundResumeClearsHold() {
+        var engine = engineWithMember(alice, member: bob)
+        _ = engine.handle(.signal(.suspend(graceMs: 30_000), from: bob))
+
+        let effects = engine.handle(.signal(.resume(), from: bob))
+        #expect(effects == [
+            .cancelTimer(.suspension(bob)),
+            .cancelTimer(.resumeRetry(bob)),
+            .emit(.peerResumed(bob)),
+        ])
+        #expect(engine.members.contains(bob))
+
+        // Not holding anything: a stray Resume is inert.
+        #expect(engine.handle(.signal(.resume(), from: bob)) == [])
     }
 
     @Test("Suspend signal round-trips the wire codec")
