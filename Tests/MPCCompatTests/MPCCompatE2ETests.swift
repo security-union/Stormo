@@ -26,16 +26,19 @@ struct MPCCompatE2ETests {
         let data: AsyncStream<(Data, PeerID)>
         let resourceStarts: AsyncStream<(String, PeerID)>
         let resourceFinishes: AsyncStream<(String, URL?, Error?)>
+        let suspends: AsyncStream<PeerID>
         private let statesIn: AsyncStream<(PeerID, MultipeerSession.PeerState)>.Continuation
         private let dataIn: AsyncStream<(Data, PeerID)>.Continuation
         private let resourceStartsIn: AsyncStream<(String, PeerID)>.Continuation
         private let resourceFinishesIn: AsyncStream<(String, URL?, Error?)>.Continuation
+        private let suspendsIn: AsyncStream<PeerID>.Continuation
 
         init() {
             (states, statesIn) = AsyncStream.makeStream()
             (data, dataIn) = AsyncStream.makeStream()
             (resourceStarts, resourceStartsIn) = AsyncStream.makeStream()
             (resourceFinishes, resourceFinishesIn) = AsyncStream.makeStream()
+            (suspends, suspendsIn) = AsyncStream.makeStream()
         }
 
         func session(_ session: MultipeerSession, peer peerID: PeerID, didChange state: MultipeerSession.PeerState) {
@@ -50,6 +53,9 @@ struct MPCCompatE2ETests {
         }
         func session(_ session: MultipeerSession, didFinishReceivingResourceWithName resourceName: String, fromPeer peerID: PeerID, at localURL: URL?, withError error: Error?) {
             resourceFinishesIn.yield((resourceName, localURL, error))
+        }
+        func session(_ session: MultipeerSession, peerDidSuspend peerID: PeerID) {
+            suspendsIn.yield(peerID)
         }
     }
 
@@ -274,6 +280,54 @@ struct MPCCompatE2ETests {
 
         sessionB.disconnect()
         sessionA.disconnect()
+    }
+
+    /// The observer-side story an app's "peer backgrounded" dialog needs:
+    /// `peerDidSuspend` fires on the notice, the peer stays `.connected`
+    /// through the grace window, and expiry arrives as `.notConnected`.
+    @Test("Suspension surfaces peerDidSuspend, then .notConnected on expiry")
+    func suspensionSurfacesToDelegate() async throws {
+        let hub = InMemoryTransport.Hub()
+        let peerA = PeerID(displayName: "SuspObserver")
+        let peerB = PeerID(displayName: "SuspSleeper")
+        let transportA = InMemoryTransport(hub: hub)
+        let transportB = InMemoryTransport(hub: hub)
+
+        let sessionA = MultipeerSession(peer: peerA, service: Self.service, transport: transportA)
+        let recorderA = SessionRecorder()
+        sessionA.delegate = recorderA
+        let advDelegate = AutoAcceptAdvertiserRecorder(accepting: sessionA)
+        let advertiser = NearbyServiceAdvertiser(
+            peer: peerA, discoveryInfo: nil, serviceType: Self.service, transport: transportA)
+        advertiser.delegate = advDelegate
+        advertiser.startAdvertisingPeer()
+
+        let sessionB = MultipeerSession(peer: peerB, service: Self.service, transport: transportB)
+        let recorderB = SessionRecorder()
+        sessionB.delegate = recorderB
+        let browserDelegate = BrowserRecorder()
+        let browser = NearbyServiceBrowser(peer: peerB, serviceType: Self.service, transport: transportB)
+        browser.delegate = browserDelegate
+        browser.startBrowsingForPeers()
+
+        var found: PeerID?
+        for await (peer, _) in browserDelegate.found { found = peer; break }
+        browser.invitePeer(try #require(found), to: sessionB, withContext: nil, timeout: 10)
+        _ = try #require(await firstState(recorderA, matching: .connected))
+        _ = try #require(await firstState(recorderB, matching: .connected))
+
+        // B backgrounds with a short grace; A gets the beyond-MC callback.
+        sessionB.announceSuspension(gracePeriod: 1)
+        var suspendedPeer: PeerID?
+        for await peer in recorderA.suspends { suspendedPeer = peer; break }
+        #expect(suspendedPeer?.displayName == "SuspSleeper")
+        #expect(sessionA.connectedPeers.count == 1, "suspended peer must stay connected")
+
+        // The link dies while suspended; grace expiry surfaces as the normal
+        // MC-shaped departure.
+        sessionB.disconnect()
+        let departed = try #require(await firstState(recorderA, matching: .notConnected))
+        #expect(departed.displayName == "SuspSleeper")
     }
 
     @Test("Advertiser, browser, and session with one PeerID share one CompatCore")

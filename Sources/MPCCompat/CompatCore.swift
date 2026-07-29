@@ -197,12 +197,19 @@ final class CompatCore: @unchecked Sendable {
             emitState(peer: member.id, state: .connected)
         case .left(let id), .unreachable(let id):
             emitState(peer: id, state: .notConnected)
-        case .suspended, .resumed:
-            // MC has no suspended state: a peer under its background grace
-            // window (C-5) simply STAYS `.connected` — grace expiry arrives
-            // as the normal `.left` → `.notConnected`, and a resume within
-            // grace is invisible (membership never lapsed).
-            break
+        case .suspended(let id):
+            // MC has no suspended state: the peer stays `.connected` through
+            // its grace window (expiry arrives as the normal `.left`); apps
+            // that want "peer backgrounded" UI get the beyond-MC callback.
+            delegateQueue.async { [weak self] in
+                guard let self, let session = self.boundSession else { return }
+                session.delegate?.session(session, peerDidSuspend: id)
+            }
+        case .resumed(let member):
+            delegateQueue.async { [weak self] in
+                guard let self, let session = self.boundSession else { return }
+                session.delegate?.session(session, peerDidResume: member.id)
+            }
         case .identityChanged:
             // TOFU continuity warning (FR-21) has no MCSession analog; ignore.
             break
