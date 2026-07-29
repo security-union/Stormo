@@ -36,12 +36,10 @@ public struct ProtocolEngine: Sendable {
         case respondToInvitation(from: PeerID, accept: Bool)
         case send(Data, to: Recipients, delivery: Delivery)
         case leave
-        /// The local app is about to be suspended (iOS backgrounding, C-5):
-        /// announce it to every connected member and treat their inevitable
-        /// connection losses as suspensions — not departures — for `grace`.
+        /// Local app about to background (C-5): announce, and treat members'
+        /// connection losses as suspensions for `grace`, not departures.
         case suspend(grace: TimeInterval)
-        /// The local app returned to the foreground: re-dial every suspended
-        /// member whose connection died while we were frozen.
+        /// Local app foregrounded: re-dial suspended members with dead links.
         case resume
     }
 
@@ -63,8 +61,7 @@ public struct ProtocolEngine: Sendable {
 
     public enum TimerKey: Hashable, Sendable {
         case invitation(PeerID)
-        /// Suspension grace window (C-5): expiry turns a suspended member into
-        /// a departed one.
+        /// Grace window (C-5): expiry turns a suspended member into a departure.
         case suspension(PeerID)
     }
 
@@ -73,12 +70,10 @@ public struct ProtocolEngine: Sendable {
         case invitationFailed(PeerID, reason: InvitationFailure)
         case peerJoined(PeerID)
         case peerLeft(PeerID)
-        /// A member announced suspension (backgrounded, C-5). It is still a
-        /// member; its connection loss is expected and does not emit `peerLeft`
+        /// Member announced suspension (C-5): still a member; no `peerLeft`
         /// until the grace window expires.
         case peerSuspended(PeerID)
-        /// A suspended member reconnected within its grace window. Membership
-        /// never lapsed.
+        /// Suspended member reconnected within grace; membership never lapsed.
         case peerResumed(PeerID)
         case messageReceived(Data, from: PeerID, delivery: Delivery)
         /// A member announced a resource transfer on the control stream (FR-17).
@@ -100,8 +95,8 @@ public struct ProtocolEngine: Sendable {
 
     public struct Configuration: Sendable {
         public var invitationTimeout: TimeInterval
-        /// Ceiling on the suspension grace a peer may request (C-5): a remote
-        /// peer must not be able to park itself as a zombie member forever.
+        /// Ceiling on requested suspension grace — a remote must not park
+        /// itself as a zombie member forever.
         public var maxSuspensionGrace: TimeInterval
 
         public init(invitationTimeout: TimeInterval = 30,
@@ -127,9 +122,8 @@ public struct ProtocolEngine: Sendable {
     // Zero-copy (DD-5/DD-6): retain the verified Signal (≤64 KB buffer) rather
     // than copying fields out of it.
     private var pendingIncoming: [PeerID: Signal] = [:]
-    // Members under a suspension grace window (C-5): their connection loss is
-    // expected and keeps membership; cleared by resume (connectionEstablished)
-    // or by the suspension timer turning them into departures.
+    // Members under a suspension grace window (C-5); cleared by reconnect or
+    // by the suspension timer turning them into departures.
     private var suspended: Set<PeerID> = []
 
     public init(localPeer: PeerID, configuration: Configuration = Configuration()) {
@@ -153,8 +147,7 @@ public struct ProtocolEngine: Sendable {
 
         case .connectionEstablished(let peer):
             connections.insert(peer)
-            // A suspended member reconnecting within its grace window resumes
-            // silently (C-5): membership never lapsed.
+            // A suspended member reconnecting within grace resumes silently.
             if suspended.remove(peer) != nil {
                 return [
                     .cancelTimer(.suspension(peer)),
@@ -180,8 +173,7 @@ public struct ProtocolEngine: Sendable {
             }
             pendingIncoming.removeValue(forKey: peer)
             if suspended.contains(peer) {
-                // Expected loss (C-5): the member is suspended, membership
-                // survives until the suspension timer expires or it resumes.
+                // Expected loss: membership survives until grace expiry.
             } else if members.remove(peer) != nil {
                 // FR-14: one peer's departure never disturbs the rest.
                 effects.append(.emit(.peerLeft(peer)))
@@ -203,11 +195,9 @@ public struct ProtocolEngine: Sendable {
             ]
 
         case .timerFired(.suspension(let peer)):
-            // Grace expired without a resume: the suspension becomes a
-            // departure (C-5). A no-op if the peer resumed or we left — and
-            // never a departure while the connection is alive (a short
-            // background can end without the link ever dropping; the other
-            // side gets no resume trigger, only this timer).
+            // Grace expired → departure. Never while the connection is alive:
+            // a short background can end without the link dropping, and the
+            // observer side has no resume trigger, only this timer.
             guard suspended.remove(peer) != nil else { return [] }
             if connections.contains(peer) { return [] }
             guard members.remove(peer) != nil else { return [] }
@@ -281,11 +271,9 @@ public struct ProtocolEngine: Sendable {
                 .map { .closeConnection($0) }
 
         case .suspend(let grace):
-            // Announce to every connected member, and mark ALL members
-            // suspended locally: our own connection-closed inputs (observed
-            // now or queued until we thaw) must not evict them before
-            // `.resume` gets a chance to re-dial. Local timers freeze with
-            // the process, so effectively the grace runs from our wake-up.
+            // Mark ALL members suspended locally: our own connection-closed
+            // inputs (now or queued until thaw) must not evict them before
+            // `.resume` can re-dial.
             let duration = min(grace, configuration.maxSuspensionGrace)
             let signal = Signal.suspend(graceMs: UInt64(duration * 1000))
             var effects: [Effect] = []
@@ -299,11 +287,9 @@ public struct ProtocolEngine: Sendable {
             return effects
 
         case .resume:
-            // Re-dial every suspended member whose connection died while we
-            // were frozen; a member whose link survived just sheds its
-            // suspension. Marks on dead-link members stay until
-            // `connectionEstablished` resumes them — a failed re-dial falls
-            // back to the grace timer.
+            // Re-dial suspended members with dead links (marks stay until
+            // `connectionEstablished`; a failed re-dial falls back to the
+            // grace timer); live links just shed their suspension.
             var effects: [Effect] = []
             let marked = members
                 .filter(suspended.contains)
@@ -387,8 +373,7 @@ public struct ProtocolEngine: Sendable {
             return [.emit(.streamOpened(label: label, from: peer))]
 
         case .suspend(let suspend):
-            // Membership-gate (DD-6), and clamp the requested grace: a remote
-            // must not park itself as a zombie member indefinitely.
+            // Membership-gate (DD-6); clamp the requested grace.
             guard members.contains(peer) else { return [] }
             let duration = min(
                 TimeInterval(suspend.graceMs) / 1000, configuration.maxSuspensionGrace)

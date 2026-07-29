@@ -237,19 +237,15 @@ public actor PeerSession {
 
     // MARK: Suspension (C-5 — iOS backgrounding)
 
-    /// Announce to every connected member that this app is about to be
-    /// suspended (call from `didEnterBackground`). Members treat the
-    /// connection loss that follows as a suspension — membership survives for
-    /// `gracePeriod` (each side clamps to its configured maximum) — instead
-    /// of an immediate departure. Pair with ``resume()`` on foreground.
+    /// Announce the coming suspension (call from `didEnterBackground`):
+    /// members hold membership through the connection loss for `gracePeriod`
+    /// (each side clamps to its configured maximum). Pair with ``resume()``.
     public func announceSuspension(gracePeriod: TimeInterval = 60) async {
         run(.command(.suspend(grace: gracePeriod)))
     }
 
-    /// Re-establish connections to members suspended while this app was
-    /// frozen (call from `didBecomeActive`). Members whose links survived
-    /// simply shed their suspension; the rest are re-dialed via their
-    /// retained endpoints, falling back to the grace timer on failure.
+    /// Re-establish connections that died while frozen (call from
+    /// `didBecomeActive`); re-dials use the retained endpoints.
     public func resume() async {
         run(.command(.resume))
     }

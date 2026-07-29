@@ -48,8 +48,8 @@ struct SuspensionRuntimeTests {
         let backgrounderID = await backgrounder.identity.id
         let observerMembership = await observer.membership
 
-        // didEnterBackground: announce, and wait until the observer has the
-        // notice — the freeze must not race the signal onto a dead link.
+        // Wait for the notice before killing — the freeze must not race the
+        // signal onto a dead link.
         await backgrounder.announceSuspension(gracePeriod: 8)
         let suspendedEvent = await firstMembership(of: observerMembership, within: 5) {
             if case .suspended(let id) = $0 { return id == backgrounderID }
@@ -65,8 +65,6 @@ struct SuspensionRuntimeTests {
         #expect(await observer.members.count == 1, "suspended member must survive the kill")
         #expect(await backgrounder.members.count == 1, "frozen side keeps its members too")
 
-        // didBecomeActive: re-dial. The observer sees the resume; membership
-        // never lapsed (no .left/.joined pair).
         await backgrounder.resume()
         let resumedEvent = await firstMembership(of: observerMembership, within: 5) {
             if case .resumed(let member) = $0 { return member.id == backgrounderID }

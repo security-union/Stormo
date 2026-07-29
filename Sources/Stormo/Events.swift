@@ -57,13 +57,10 @@ public enum MembershipEvent: Sendable {
     case joined(SessionPeer)
     case left(PeerID)
     case unreachable(PeerID)
-    /// The member announced suspension (iOS backgrounding, C-5). It is STILL
-    /// a member: its connection loss is expected, and either `.resumed`
-    /// follows (reconnect within the grace window) or `.left` does (grace
-    /// expired).
+    /// Member announced suspension (C-5): STILL a member — either `.resumed`
+    /// follows (reconnect within grace) or `.left` does (grace expired).
     case suspended(PeerID)
-    /// A suspended member reconnected within its grace window. Membership
-    /// never lapsed — no `.left`/`.joined` pair is emitted around it.
+    /// Suspended member reconnected within grace; no `.left`/`.joined` pair.
     case resumed(SessionPeer)
     /// A previously known peer reconnected with a different key (TrustPolicy.automatic
     /// continuity warning, FR-21).
