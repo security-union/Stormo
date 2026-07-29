@@ -454,6 +454,83 @@ extension MPCCompatE2ETests {
         browser.stopBrowsingForPeers()
     }
 
+    /// The camera-side half of the stuck-rescan field bug: the CAMERA returns
+    /// to its advertising screen and cycles its advertiser, app-exact
+    /// (`MultipeerService.startAdvertisingOnly(discoveryInfo:)`:
+    /// `stopAdvertisingPeer()`, a NEW compat advertiser on the same core,
+    /// `startAdvertisingPeer()` — no awaits between them). The monitor keeps
+    /// browsing and re-invites. In the field every connect failed until the
+    /// camera left the screen entirely (full teardown) and advertised fresh.
+    @Test("Camera re-advertise cycle after disconnect accepts a new invite")
+    func cameraReadvertiseAfterDisconnectOverQUIC() async throws {
+        setenv("STORMO_NO_P2P", "1", 1)
+        let probe = PeerIdentity(name: "compat-readv-probe")
+        guard QUICTransport.isTLSIdentityAvailable(for: probe) else {
+            print("[skip] no TLS identity in this environment"); return
+        }
+        let service = "_pmreadv\(UInt16.random(in: 1000...9999))._udp"
+        let peerA = PeerID(displayName: "ReadvCam")
+        let peerB = PeerID(displayName: "ReadvMon")
+
+        let sessionA = MultipeerSession(peer: peerA, service: service)
+        let recorderA = SessionRecorder()
+        sessionA.delegate = recorderA
+        let advDelegate = AutoAcceptAdvertiserRecorder(accepting: sessionA)
+        var advertiser = NearbyServiceAdvertiser(
+            peer: peerA, discoveryInfo: ["role": "camera"], serviceType: service)
+        advertiser.delegate = advDelegate
+        advertiser.startAdvertisingPeer()
+
+        let sessionB = MultipeerSession(peer: peerB, service: service)
+        let recorderB = SessionRecorder()
+        sessionB.delegate = recorderB
+        let browserDelegate = BrowserRecorder()
+        let browser = NearbyServiceBrowser(peer: peerB, serviceType: service)
+        browser.delegate = browserDelegate
+        browser.startBrowsingForPeers()
+
+        // Round 1: find, invite, connect, then disconnect.
+        let round1 = await first(of: browserDelegate.found, within: 15) { $0.0.displayName == "ReadvCam" }
+        let target = try #require(round1?.0, "round 1 must discover the camera")
+        browser.invitePeer(target, to: sessionB, withContext: nil, timeout: 25)
+        #expect(await firstState(recorderB, matching: .connected) != nil, "round 1 must connect")
+        sessionB.disconnect()
+        #expect(await firstState(recorderA, matching: .notConnected) != nil,
+                "camera must observe the departure")
+
+        // Camera scanning-screen revisit, app-exact: stop, NEW advertiser
+        // resolving the same core, start — synchronous, back to back.
+        advertiser.stopAdvertisingPeer()
+        advertiser = NearbyServiceAdvertiser(
+            peer: peerA, discoveryInfo: ["role": "camera"], serviceType: service)
+        advertiser.startAdvertisingPeer()
+
+        // App-exact rebuildSessionIfIdle on BOTH sides: fresh MCSessions for
+        // round 2 (the camera accepts with a virgin session, the monitor
+        // invites with one).
+        let sessionA2 = MultipeerSession(peer: peerA, service: service)
+        let recorderA2 = SessionRecorder()
+        sessionA2.delegate = recorderA2
+        let advDelegate2 = AutoAcceptAdvertiserRecorder(accepting: sessionA2)
+        advertiser.delegate = advDelegate2
+
+        let sessionB2 = MultipeerSession(peer: peerB, service: service)
+        let recorderB2 = SessionRecorder()
+        sessionB2.delegate = recorderB2
+
+        // The monitor (still browsing) re-invites: the cycled camera must
+        // accept and reach .connected — the user-visible recovery that failed
+        // in the field until the camera was torn down completely.
+        browser.invitePeer(target, to: sessionB2, withContext: nil, timeout: 25)
+        #expect(await firstState(recorderB2, matching: .connected) != nil,
+                "re-invite after the camera's advertiser cycle must connect")
+
+        sessionB.disconnect()
+        sessionA.disconnect()
+        advertiser.stopAdvertisingPeer()
+        browser.stopBrowsingForPeers()
+    }
+
     /// A repeated `startAdvertisingPeer()` (no stop in between) must not leak
     /// the previous NWListener. The regression: `startAdvertising` overwrote
     /// the listener box without cancelling the old listener, so the orphaned
