@@ -107,6 +107,21 @@ invitations — unchanged call sites.
   `PeerSession.openStream`.
 - No 8-peer cap; sessions support 32+ peers full-mesh.
 
+**6. Two MPC habits that break here.** If your app connects once and never
+again, look here first:
+
+- **Reuse the session; never rebuild it per attempt.** `MultipeerSession` is a
+  facade over one long-lived peer session, so a "virgin session" resets no
+  transport — its `disconnect()` closes every open connection, including the
+  one that just delivered the invitation you're accepting.
+- **Never restart an attempt still in flight.** A QUIC dial takes seconds, not
+  milliseconds. Retry on failure, not on a timer.
+
+**7. `foundPeer` can fire twice for one peer.** Peer-to-peer Wi-Fi surfaces a
+key-hash placeholder name first, then re-delivers with the real one. Equality
+is key-hash-only, so update your peer list in place — dedup-and-drop freezes
+the placeholder in your UI.
+
 ## Docs
 
 [Design document](docs/design-mpc-successor.md) ·

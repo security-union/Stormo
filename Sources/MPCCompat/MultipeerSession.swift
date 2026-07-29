@@ -211,6 +211,12 @@ public final class MultipeerSession: @unchecked Sendable {
         throw StormoError.unimplemented("MultipeerSession.startStream")
     }
 
+    /// `MCSession.disconnect()` semantics. The session stays usable — reuse it.
+    ///
+    /// - Important: never build a fresh session per connection attempt. This is
+    ///   a facade over one long-lived peer session, so a virgin session resets
+    ///   no transport and this disconnect closes live connections — including
+    ///   one carrying an invitation you are about to accept.
     public func disconnect() {
         // MCSession semantics: drop session connections/membership ONLY.
         // Advertiser/browser (independent objects in MPC) keep running, and

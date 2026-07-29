@@ -552,7 +552,7 @@ for await chunk in try await session.openStream("telemetry", with: peer) { ... }
 | **S-2** | Practical AWDL full-mesh ceiling: does 32-peer mesh hold on real radios, or does airtime contention force `.hostRelay` earlier? | Incremental device-lab scaling (8→16→32) measuring join convergence + datagram p95 | Documented per-topology peer ceilings for QA-2 |
 | **S-3** | `NWMultiplexGroup`/`NWConnectionGroup` for QUIC stream management vs. manual per-stream `NWConnection`s — which is stable on-device? | Prototype both stream-opening paths | Pick one; document OS-version quirks |
 | **S-4** | Pairing-code transcript binding: is the TLS exporter accessible via `sec_protocol_metadata`, or do we bind via post-handshake channel-binding message? | Security spike + external review | Design note signed off before FR-21 implementation |
-| **S-5** | Background/foreground transitions: QUIC connection migration behavior vs. rebuild-on-resume | Device testing with app lifecycle scripting | Documented resume semantics for C-5 |
+| **S-5** | Background/foreground transitions: how fast does a backgrounded app's connection die, and how quickly can a re-invite reconnect on wake? | Device testing with app lifecycle scripting | Documented reconnect timings for C-5 |
 | **S-6** | Stream-per-message churn (DD-7): what stream open/FIN rate does Network.framework QUIC sustain, and at what per-stream memory cost? | Tier-2 loopback benchmark: open→header+payload→FIN at increasing rates (10²–10⁴ msg/s), small and 1 MB payloads; measure latency, memory, failures | Sustains ≥ 1,000 msg/s loopback with flat memory → confirm DD-7; else define message-coalescing fallback on a shared stream for high-rate senders |
 
 ---

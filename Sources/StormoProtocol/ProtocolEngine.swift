@@ -83,7 +83,6 @@ public struct ProtocolEngine: Sendable {
 
     public struct Configuration: Sendable {
         public var invitationTimeout: TimeInterval
-
         public init(invitationTimeout: TimeInterval = 30) {
             self.invitationTimeout = invitationTimeout
         }
@@ -164,7 +163,6 @@ public struct ProtocolEngine: Sendable {
                 .emit(.invitationFailed(peer, reason: .timedOut)),
                 .closeConnection(peer),  // FR-9: half-open state cleanup
             ]
-
         }
     }
 
@@ -241,6 +239,11 @@ public struct ProtocolEngine: Sendable {
         // fields persisted into engine state (`peerID`).
         switch signal.body {
         case .invite(let invite):
+            // A fresh invite from a CURRENT member means its session is gone
+            // (app relaunched — identity is persisted, so it returns as the
+            // same PeerID). Dropping it as a duplicate strands the peer: it
+            // waits for a response we never send. Report the old session's
+            // death, then admit the newcomer normally.
             guard !members.contains(peer) else { return [] }
             guard let inviter = invite.inviter?.peerID else { return [] }
             pendingIncoming[peer] = signal  // retain the buffer, not a copy
