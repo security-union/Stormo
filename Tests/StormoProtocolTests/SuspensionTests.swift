@@ -54,7 +54,7 @@ struct SuspensionTests {
         _ = engine.handle(.connectionClosed(bob))
 
         let expired = engine.handle(.timerFired(.suspension(bob)))
-        #expect(expired == [.emit(.peerLeft(bob))])
+        #expect(expired == [.cancelTimer(.resumeRetry(bob)), .emit(.peerLeft(bob))])
         #expect(engine.members.isEmpty)
 
         // The timer is one-shot: a stale second fire is a no-op.
@@ -70,6 +70,7 @@ struct SuspensionTests {
         let reconnect = engine.handle(.connectionEstablished(bob))
         #expect(reconnect == [
             .cancelTimer(.suspension(bob)),
+            .cancelTimer(.resumeRetry(bob)),
             .emit(.peerResumed(bob)),
         ])
         #expect(engine.members.contains(bob))
@@ -105,14 +106,60 @@ struct SuspensionTests {
         _ = engine.handle(.connectionClosed(bob))
 
         let effects = engine.handle(.command(.resume))
-        #expect(effects == [.connect(to: bob)])
+        #expect(effects == [
+            .connect(to: bob),
+            .startTimer(.resumeRetry(bob), duration: 1),
+        ])
 
-        // The re-dial completing resumes the member.
+        // The re-dial completing resumes the member and stops the loop.
         let reconnected = engine.handle(.connectionEstablished(bob))
         #expect(reconnected == [
             .cancelTimer(.suspension(bob)),
+            .cancelTimer(.resumeRetry(bob)),
             .emit(.peerResumed(bob)),
         ])
+    }
+
+    @Test("Resume re-dial ticks at a fixed rate until reconnect")
+    func resumeRetriesAtFixedRate() {
+        var engine = engineWithMember(alice, member: bob)
+        _ = engine.handle(.command(.suspend(grace: 60)))
+        _ = engine.handle(.connectionClosed(bob))
+        _ = engine.handle(.command(.resume))
+
+        // The dial fails (radio not back yet): membership held, and each
+        // tick re-dials and re-arms — fixed rate, no backoff.
+        _ = engine.handle(.connectionClosed(bob))
+        #expect(engine.members.contains(bob))
+        let tick = engine.handle(.timerFired(.resumeRetry(bob)))
+        #expect(tick == [
+            .connect(to: bob),
+            .startTimer(.resumeRetry(bob), duration: 1),
+        ])
+
+        // Reconnect stops the loop: a stale tick is a no-op.
+        _ = engine.handle(.connectionEstablished(bob))
+        #expect(engine.handle(.timerFired(.resumeRetry(bob))) == [])
+    }
+
+    @Test("Resume re-dial dies with the suspension")
+    func resumeRetryStopsOnExpiryAndLeave() {
+        var engine = engineWithMember(alice, member: bob)
+        _ = engine.handle(.command(.suspend(grace: 60)))
+        _ = engine.handle(.connectionClosed(bob))
+        _ = engine.handle(.command(.resume))
+
+        // Grace expiry evicts the member; the next tick must go quiet.
+        _ = engine.handle(.timerFired(.suspension(bob)))
+        #expect(engine.handle(.timerFired(.resumeRetry(bob))) == [])
+
+        // Same after leave.
+        var engine2 = engineWithMember(alice, member: bob)
+        _ = engine2.handle(.command(.suspend(grace: 60)))
+        _ = engine2.handle(.connectionClosed(bob))
+        _ = engine2.handle(.command(.resume))
+        _ = engine2.handle(.command(.leave))
+        #expect(engine2.handle(.timerFired(.resumeRetry(bob))) == [])
     }
 
     @Test("Resume with the connection still alive sheds the suspension in place")

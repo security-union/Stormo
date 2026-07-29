@@ -63,6 +63,8 @@ public struct ProtocolEngine: Sendable {
         case invitation(PeerID)
         /// Grace window (C-5): expiry turns a suspended member into a departure.
         case suspension(PeerID)
+        /// Fixed-rate resume re-dial tick; stops on reconnect or grace expiry.
+        case resumeRetry(PeerID)
     }
 
     public enum Event: Sendable, Equatable {
@@ -98,11 +100,16 @@ public struct ProtocolEngine: Sendable {
         /// Ceiling on requested suspension grace — a remote must not park
         /// itself as a zombie member forever.
         public var maxSuspensionGrace: TimeInterval
+        /// Fixed interval between resume re-dials (no backoff by design —
+        /// the loop ends at reconnect or grace expiry).
+        public var resumeRetryInterval: TimeInterval
 
         public init(invitationTimeout: TimeInterval = 30,
-                    maxSuspensionGrace: TimeInterval = 120) {
+                    maxSuspensionGrace: TimeInterval = 120,
+                    resumeRetryInterval: TimeInterval = 1) {
             self.invitationTimeout = invitationTimeout
             self.maxSuspensionGrace = maxSuspensionGrace
+            self.resumeRetryInterval = resumeRetryInterval
         }
     }
 
@@ -151,6 +158,7 @@ public struct ProtocolEngine: Sendable {
             if suspended.remove(peer) != nil {
                 return [
                     .cancelTimer(.suspension(peer)),
+                    .cancelTimer(.resumeRetry(peer)),
                     .emit(.peerResumed(peer)),
                 ]
             }
@@ -201,7 +209,20 @@ public struct ProtocolEngine: Sendable {
             guard suspended.remove(peer) != nil else { return [] }
             if connections.contains(peer) { return [] }
             guard members.remove(peer) != nil else { return [] }
-            return [.emit(.peerLeft(peer))]
+            return [
+                .cancelTimer(.resumeRetry(peer)),
+                .emit(.peerLeft(peer)),
+            ]
+
+        case .timerFired(.resumeRetry(let peer)):
+            // Fixed-rate re-dial while resuming; dies with the suspension.
+            guard suspended.contains(peer), members.contains(peer),
+                !connections.contains(peer)
+            else { return [] }
+            return [
+                .connect(to: peer),
+                .startTimer(.resumeRetry(peer), duration: configuration.resumeRetryInterval),
+            ]
         }
     }
 
@@ -287,9 +308,9 @@ public struct ProtocolEngine: Sendable {
             return effects
 
         case .resume:
-            // Re-dial suspended members with dead links (marks stay until
-            // `connectionEstablished`; a failed re-dial falls back to the
-            // grace timer); live links just shed their suspension.
+            // Re-dial suspended members with dead links at a fixed rate
+            // (resumeRetry ticks; the loop ends on reconnect or grace
+            // expiry); live links just shed their suspension.
             var effects: [Effect] = []
             let marked = members
                 .filter(suspended.contains)
@@ -300,6 +321,8 @@ public struct ProtocolEngine: Sendable {
                     effects.append(.cancelTimer(.suspension(member)))
                 } else {
                     effects.append(.connect(to: member))
+                    effects.append(.startTimer(
+                        .resumeRetry(member), duration: configuration.resumeRetryInterval))
                 }
             }
             return effects
