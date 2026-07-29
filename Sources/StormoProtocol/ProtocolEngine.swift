@@ -135,6 +135,10 @@ public struct ProtocolEngine: Sendable {
     // The clamped grace announced by OUR `.suspend`, consumed by `.resume` to
     // arm grace timers at wake — the frozen side never runs timers.
     private var localSuspensionGrace: TimeInterval?
+    // Members that came back from a suspension grace hold. A fresh invite
+    // from one is a relaunched app (new session) rather than a duplicate;
+    // mesh-formation peers are never suspended, so they are never flagged.
+    private var reconnectedMembers: Set<PeerID> = []
 
     public init(localPeer: PeerID, configuration: Configuration = Configuration()) {
         self.localPeer = localPeer
@@ -159,6 +163,10 @@ public struct ProtocolEngine: Sendable {
             connections.insert(peer)
             // A suspended member reconnecting within grace resumes silently.
             if suspended.remove(peer) != nil {
+                // Held under grace and now back: this is either the SAME
+                // process resuming, or a relaunched one about to invite. The
+                // invite handler decides; mesh peers never reach here.
+                reconnectedMembers.insert(peer)
                 return [
                     .cancelTimer(.suspension(peer)),
                     .cancelTimer(.resumeRetry(peer)),
@@ -177,6 +185,7 @@ public struct ProtocolEngine: Sendable {
 
         case .connectionClosed(let peer):
             connections.remove(peer)
+            reconnectedMembers.remove(peer)
             var effects: [Effect] = []
             if pendingOutgoing.removeValue(forKey: peer) != nil {
                 effects.append(.cancelTimer(.invitation(peer)))
@@ -292,6 +301,7 @@ public struct ProtocolEngine: Sendable {
             pendingOutgoing.removeAll()
             pendingIncoming.removeAll()
             suspended.removeAll()  // stale suspension timers no-op on fire
+            reconnectedMembers.removeAll()
             localSuspensionGrace = nil
             return open
                 .sorted { $0.keyHash.lexicographicallyPrecedes($1.keyHash) }
@@ -350,11 +360,28 @@ public struct ProtocolEngine: Sendable {
         // fields persisted into engine state (`peerID`).
         switch signal.body {
         case .invite(let invite):
-            guard !members.contains(peer) else { return [] }
-            guard let inviter = invite.inviter?.peerID else { return [] }
+            // A fresh invite from a CURRENT member means its session is gone
+            // (app relaunched — identity is persisted, so it returns as the
+            // same PeerID). Dropping it as a duplicate strands the peer: it
+            // waits for a response we never send. Report the old session's
+            // death, then admit the newcomer normally.
+            var effects: [Effect] = []
+            if members.contains(peer) {
+                // Glare during mesh formation (both sides invite at once) is a
+                // duplicate — drop it. Only a member returning from a grace
+                // hold is introducing a genuinely new session.
+                guard reconnectedMembers.remove(peer) != nil else { return [] }
+                members.remove(peer)
+                suspended.remove(peer)
+                effects.append(.cancelTimer(.suspension(peer)))
+                effects.append(.cancelTimer(.resumeRetry(peer)))
+                effects.append(.emit(.peerLeft(peer)))
+            }
+            guard let inviter = invite.inviter?.peerID else { return effects }
             pendingIncoming[peer] = signal  // retain the buffer, not a copy
             let context = invite.hasContext ? Data(invite.context) : nil  // app-ownership copy
-            return [.emit(.invitationReceived(from: inviter, context: context))]
+            effects.append(.emit(.invitationReceived(from: inviter, context: context)))
+            return effects
 
         case .inviteResponse(let response):
             guard pendingOutgoing.removeValue(forKey: peer) != nil else { return [] }

@@ -234,6 +234,31 @@ struct SuspensionTests {
         #expect(engine.handle(.signal(.resume(), from: bob)) == [])
     }
 
+    /// Device bug: the remote app was killed and relaunched while the camera
+    /// still held it (grace, or an unnoticed death). Identity is persisted, so
+    /// it re-invited as the SAME PeerID — and the engine dropped the invite as
+    /// a duplicate member, so the camera never answered and the relaunched app
+    /// could never reconnect.
+    @Test("A relaunched member's fresh invite is a rejoin, not a duplicate")
+    func reinviteFromMemberIsRejoin() {
+        var engine = engineWithMember(alice, member: bob)
+        _ = engine.handle(.signal(.suspend(graceMs: 60_000), from: bob))
+        _ = engine.handle(.connectionClosed(bob))
+        #expect(engine.members.contains(bob), "held under grace")
+
+        // The relaunched process dials in and invites afresh.
+        _ = engine.handle(.connectionEstablished(bob))
+        let effects = engine.handle(.signal(.invite(inviter: bob, context: nil), from: bob))
+        #expect(effects.contains(.emit(.peerLeft(bob))), "the old session really did end")
+        #expect(effects.contains(.emit(.invitationReceived(from: bob, context: nil))),
+                "…and the newcomer must be offered to the app")
+
+        // Accepting completes the rejoin.
+        let accepted = engine.handle(.command(.respondToInvitation(from: bob, accept: true)))
+        #expect(accepted.contains(.emit(.peerJoined(bob))))
+        #expect(engine.members.contains(bob))
+    }
+
     @Test("Suspend signal round-trips the wire codec")
     func suspendSignalRoundTrip() throws {
         let signal = Signal.suspend(graceMs: 45_000)
