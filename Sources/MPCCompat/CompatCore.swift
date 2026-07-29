@@ -22,11 +22,14 @@ import Stormo
 /// those objects, the core only borrows them for dispatch — and are written
 /// under ``lock``. Hence `@unchecked Sendable`.
 ///
-/// ### Fresh-session-after-disconnect
-/// `MCSession` is (in practice) reusable after `disconnect()`; remote-shutter
-/// relies on this via `rebuildSessionIfIdle`. ``teardown()`` cancels the pumps
-/// and disconnects the `PeerSession`; the next action lazily rebuilds a fresh
-/// `PeerSession` under the *same* identity via ``liveSession()``.
+/// ### One session, reused — never rebuilt per attempt
+/// The session is reusable after `disconnect()`, and callers are expected to
+/// reuse it. Rebuilding a `MultipeerSession` per connection attempt (a common
+/// MPC habit) resets no transport here — it only routes to ``leaveSession()``,
+/// which closes every open connection, including one that just completed its
+/// handshake and delivered an invitation. ``teardown()`` is the deliberate
+/// full stop; the next action lazily rebuilds a `PeerSession` under the *same*
+/// identity via ``liveSession()``.
 final class CompatCore: @unchecked Sendable {
 
     /// The app-facing `PeerID` this core was keyed on (registry identity).
