@@ -235,21 +235,6 @@ public actor PeerSession {
     /// Currently admitted session members (excluding the local peer).
     public var members: Set<PeerID> { engine.members }
 
-    // MARK: Suspension (C-5 — iOS backgrounding)
-
-    /// Announce the coming suspension (call from `didEnterBackground`):
-    /// members hold membership through the connection loss for `gracePeriod`
-    /// (each side clamps to its configured maximum). Pair with ``resume()``.
-    public func announceSuspension(gracePeriod: TimeInterval = 60) async {
-        run(.command(.suspend(grace: gracePeriod)))
-    }
-
-    /// Re-establish connections that died while frozen (call from
-    /// `didBecomeActive`); re-dials use the retained endpoints.
-    public func resume() async {
-        run(.command(.resume))
-    }
-
     // MARK: Lifecycle
 
     /// Leave the session — close all peer connections and clear membership —
@@ -379,12 +364,6 @@ public actor PeerSession {
 
         case .peerLeft(let peer):
             membershipContinuation.yield(.left(peer))
-
-        case .peerSuspended(let peer):
-            membershipContinuation.yield(.suspended(peer))
-
-        case .peerResumed(let peer):
-            membershipContinuation.yield(.resumed(SessionPeer(id: peer)))
 
         case .invitationFailed(let peer, let reason):
             let error: StormoError

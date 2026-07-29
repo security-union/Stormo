@@ -67,20 +67,6 @@ table StreamOpen {
   label:string (id: 0);
 }
 
-/// The sender is about to be suspended (iOS backgrounding, C-5). Receivers
-/// treat the connection loss that follows as a suspension, not a departure,
-/// for up to `grace_ms` (clamped by the receiver's configuration): membership
-/// survives, and a reconnect within the grace resumes the peer silently.
-table Suspend {
-  grace_ms:ulong (id: 0);
-}
-
-/// The sender is back in the foreground on a connection that SURVIVED the
-/// suspension. A reconnect announces itself by connecting; a link that never
-/// dropped has no such moment, so it says so explicitly.
-table Resume {
-}
-
 union SignalBody {
   Invite,
   InviteResponse,
@@ -88,8 +74,6 @@ union SignalBody {
   RosterUpdate,
   TransferOffer,
   StreamOpen,
-  Suspend,
-  Resume,
 }
 
 /// Envelope for every control-plane message (DD-5 rule 1). Size-prefixed on

@@ -285,19 +285,6 @@ The obvious alternative to a bespoke protocol is libp2p (the IPFS-lineage modula
 
 **Adopted from libp2p instead:** the PeerID identity encoding (multihash of the encoded public key, CIDv1 text representation) SHALL replace the ad-hoc SHA-256-of-raw-key format before the wire protocol freezes — near-zero cost now, and it keeps a future libp2p bridge (post-1.0 internet reach via relays) identity-compatible. Revisit trigger: if post-1.0 scope expands to internet-wide P2P (NAT traversal/relays), evaluate bridging to libp2p protocols rather than reinventing that tier.
 
-### DD-9: Suspension grace — announced backgrounding is not a departure (C-5) — **adopted**
-
-iOS suspension freezes the process, PINGs stop, and the peer's 5 s idle timeout kills the QUIC connection — nothing in userspace can prevent that (MPC survived backgrounding only because system daemons owned its links). Stormo therefore makes suspension explicit rather than trying to keep sockets alive:
-
-- **Wire:** a `Suspend { grace_ms }` control signal, sent by the backgrounding app (`PeerSession.announceSuspension(gracePeriod:)` from `didEnterBackground`) over the still-alive connection — milliseconds of work, well inside iOS's background transition window.
-- **Receiver:** membership-gated; the requested grace clamps to `Configuration.maxSuspensionGrace` (120 s default) so a remote cannot park itself as a zombie member. The member is marked suspended and a `suspension` timer arms. Its subsequent `connectionClosed` emits **no `peerLeft`** — membership survives. Timer expiry turns the suspension into an ordinary departure; expiry never evicts a member whose connection is alive (a short background can end without the link dropping, and the observer's only signal is this timer).
-- **Sender:** marks all its members suspended and says goodbye — nothing else. A process about to freeze arms **no timers** (frozen code doesn't run, and wall-clock deadlines would all fire at once on thaw); the marks only keep its queued connection-closed inputs from evicting members.
-- **Resume:** `PeerSession.resume()` (from `didBecomeActive`) is the sender's next provable execution point, so its grace clock starts **here**: for each suspended member with a dead link it arms the grace timer and re-dials via the retained endpoint at a **fixed rate** (`resumeRetryInterval`, 1 s, deliberately no backoff — the loop is bounded by reconnect or that grace). A reconnect within grace cancels the timers and emits `peerResumed`/`.resumed`: membership never lapsed, no re-invitation, no roster churn. Resume is always a **fresh QUIC connection** (rebuild-on-resume, not connection migration): the dead connection object is discarded normally, and the grace is membership bookkeeping above the transport, never a socket-lifetime trick.
-- **Trust boundary:** suspension state enters only through an explicit, authenticated in-session `Suspend` or the local app's own command. A silent drop with no notice is still a departure in ~5 s — walk-away detection (QA-5) is unchanged.
-- **MPCCompat:** MC has no suspended state, so a suspended peer simply stays `.connected` through its grace (expiry arrives as the normal `.notConnected`); apps that want "peer backgrounded" UI use the beyond-MC `peerDidSuspend`/`peerDidResume` delegate callbacks.
-
-Engine mechanics live in `ProtocolEngine` (`suspended` set, `TimerKey.suspension`/`.resumeRetry`), asserted by tier-1 spec tests (`SuspensionTests`) and the tier-2 announce→kill→resume/expiry loop (`SuspensionRuntimeTests`).
-
 ---
 
 ## 7. Architecture Overview (module view)
@@ -565,7 +552,7 @@ for await chunk in try await session.openStream("telemetry", with: peer) { ... }
 | **S-2** | Practical AWDL full-mesh ceiling: does 32-peer mesh hold on real radios, or does airtime contention force `.hostRelay` earlier? | Incremental device-lab scaling (8→16→32) measuring join convergence + datagram p95 | Documented per-topology peer ceilings for QA-2 |
 | **S-3** | `NWMultiplexGroup`/`NWConnectionGroup` for QUIC stream management vs. manual per-stream `NWConnection`s — which is stable on-device? | Prototype both stream-opening paths | Pick one; document OS-version quirks |
 | **S-4** | Pairing-code transcript binding: is the TLS exporter accessible via `sec_protocol_metadata`, or do we bind via post-handshake channel-binding message? | Security spike + external review | Design note signed off before FR-21 implementation |
-| **S-5** | Hardware validation of DD-9 over AWDL: does the thaw-time re-dial reconnect within the grace on real radios (AWDL re-establishment latency after suspension)? | Device testing with app lifecycle scripting | DD-9 resume loop reconnects on-device across short/long backgrounds |
+| **S-5** | Background/foreground transitions: how fast does a backgrounded app's connection die, and how quickly can a re-invite reconnect on wake? | Device testing with app lifecycle scripting | Documented reconnect timings for C-5 |
 | **S-6** | Stream-per-message churn (DD-7): what stream open/FIN rate does Network.framework QUIC sustain, and at what per-stream memory cost? | Tier-2 loopback benchmark: open→header+payload→FIN at increasing rates (10²–10⁴ msg/s), small and 1 MB payloads; measure latency, memory, failures | Sustains ≥ 1,000 msg/s loopback with flat memory → confirm DD-7; else define message-coalescing fallback on a shared stream for high-rate senders |
 
 ---

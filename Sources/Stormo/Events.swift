@@ -52,16 +52,11 @@ public enum DiscoveryEvent: Sendable {
     case lost(PeerID)
 }
 
-/// Session membership events (FR-10, FR-13, FR-14, C-5).
+/// Session membership events (FR-10, FR-13, FR-14).
 public enum MembershipEvent: Sendable {
     case joined(SessionPeer)
     case left(PeerID)
     case unreachable(PeerID)
-    /// Member announced suspension (C-5): STILL a member — either `.resumed`
-    /// follows (reconnect within grace) or `.left` does (grace expired).
-    case suspended(PeerID)
-    /// Suspended member reconnected within grace; no `.left`/`.joined` pair.
-    case resumed(SessionPeer)
     /// A previously known peer reconnected with a different key (TrustPolicy.automatic
     /// continuity warning, FR-21).
     case identityChanged(PeerID, previousKeyHash: Data)

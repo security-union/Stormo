@@ -20,10 +20,8 @@ public enum Stormo_Wire_SignalBody: UInt8, UnionEnum {
   case rosterupdate = 4
   case transferoffer = 5
   case streamopen = 6
-  case suspend = 7
-  case resume = 8
 
-  public static var max: Stormo_Wire_SignalBody { return .resume }
+  public static var max: Stormo_Wire_SignalBody { return .streamopen }
   public static var min: Stormo_Wire_SignalBody { return .none_ }
 }
 
@@ -342,66 +340,6 @@ public struct Stormo_Wire_StreamOpen: FlatBufferObject, Verifiable {
   }
 }
 
-///  The sender is about to be suspended (iOS backgrounding, C-5). Receivers
-///  treat the connection loss that follows as a suspension, not a departure,
-///  for up to `grace_ms` (clamped by the receiver's configuration): membership
-///  survives, and a reconnect within the grace resumes the peer silently.
-public struct Stormo_Wire_Suspend: FlatBufferObject, Verifiable {
-
-  static func validateVersion() { FlatBuffersVersion_25_2_10() }
-  public var __buffer: ByteBuffer! { return _accessor.bb }
-  private var _accessor: Table
-
-  private init(_ t: Table) { _accessor = t }
-  public init(_ bb: ByteBuffer, o: Int32) { _accessor = Table(bb: bb, position: o) }
-
-  private enum VTOFFSET: VOffset {
-    case graceMs = 4
-    var v: Int32 { Int32(self.rawValue) }
-    var p: VOffset { self.rawValue }
-  }
-
-  public var graceMs: UInt64 { let o = _accessor.offset(VTOFFSET.graceMs.v); return o == 0 ? 0 : _accessor.readBuffer(of: UInt64.self, at: o) }
-  public static func startSuspend(_ fbb: inout FlatBufferBuilder) -> UOffset { fbb.startTable(with: 1) }
-  public static func add(graceMs: UInt64, _ fbb: inout FlatBufferBuilder) { fbb.add(element: graceMs, def: 0, at: VTOFFSET.graceMs.p) }
-  public static func endSuspend(_ fbb: inout FlatBufferBuilder, start: UOffset) -> Offset { let end = Offset(offset: fbb.endTable(at: start)); return end }
-  public static func createSuspend(
-    _ fbb: inout FlatBufferBuilder,
-    graceMs: UInt64 = 0
-  ) -> Offset {
-    let __start = Stormo_Wire_Suspend.startSuspend(&fbb)
-    Stormo_Wire_Suspend.add(graceMs: graceMs, &fbb)
-    return Stormo_Wire_Suspend.endSuspend(&fbb, start: __start)
-  }
-
-  public static func verify<T>(_ verifier: inout Verifier, at position: Int, of type: T.Type) throws where T: Verifiable {
-    var _v = try verifier.visitTable(at: position)
-    try _v.visit(field: VTOFFSET.graceMs.p, fieldName: "graceMs", required: false, type: UInt64.self)
-    _v.finish()
-  }
-}
-
-///  The sender is back in the foreground on a connection that SURVIVED the
-///  suspension. A reconnect announces itself by connecting; a link that never
-///  dropped has no such moment, so it says so explicitly.
-public struct Stormo_Wire_Resume: FlatBufferObject, Verifiable {
-
-  static func validateVersion() { FlatBuffersVersion_25_2_10() }
-  public var __buffer: ByteBuffer! { return _accessor.bb }
-  private var _accessor: Table
-
-  private init(_ t: Table) { _accessor = t }
-  public init(_ bb: ByteBuffer, o: Int32) { _accessor = Table(bb: bb, position: o) }
-
-  public static func startResume(_ fbb: inout FlatBufferBuilder) -> UOffset { fbb.startTable(with: 0) }
-  public static func endResume(_ fbb: inout FlatBufferBuilder, start: UOffset) -> Offset { let end = Offset(offset: fbb.endTable(at: start)); return end }
-
-  public static func verify<T>(_ verifier: inout Verifier, at position: Int, of type: T.Type) throws where T: Verifiable {
-    var _v = try verifier.visitTable(at: position)
-    _v.finish()
-  }
-}
-
 ///  Envelope for every control-plane message (DD-5 rule 1). Size-prefixed on
 ///  the wire. Unknown body variants are ignored-and-logged, never fatal (QA-11).
 public struct Stormo_Wire_Signal: FlatBufferObject, Verifiable {
@@ -455,10 +393,6 @@ public struct Stormo_Wire_Signal: FlatBufferObject, Verifiable {
         try ForwardOffset<Stormo_Wire_TransferOffer>.verify(&verifier, at: pos, of: Stormo_Wire_TransferOffer.self)
       case .streamopen:
         try ForwardOffset<Stormo_Wire_StreamOpen>.verify(&verifier, at: pos, of: Stormo_Wire_StreamOpen.self)
-      case .suspend:
-        try ForwardOffset<Stormo_Wire_Suspend>.verify(&verifier, at: pos, of: Stormo_Wire_Suspend.self)
-      case .resume:
-        try ForwardOffset<Stormo_Wire_Resume>.verify(&verifier, at: pos, of: Stormo_Wire_Resume.self)
       }
     })
     _v.finish()

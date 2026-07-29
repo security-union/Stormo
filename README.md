@@ -117,15 +117,7 @@ again, look here first:
 - **Never restart an attempt still in flight.** A QUIC dial takes seconds, not
   milliseconds. Retry on failure, not on a timer.
 
-**7. Backgrounding is yours now.** MPC's link was daemon-owned and survived
-suspension; a userspace QUIC connection dies ~5 s into the freeze. Call
-`announceSuspension(gracePeriod:)` from `didEnterBackground` and
-`resumeFromSuspension()` from `didBecomeActive` — peers then hold membership
-across it and reconnect silently. `peerDidSuspend`/`peerDidResume` drive your
-"reconnecting" UI; grace expiry arrives as the ordinary `.notConnected`
-([DD-9](docs/design-mpc-successor.md)).
-
-**8. `foundPeer` can fire twice for one peer.** Peer-to-peer Wi-Fi surfaces a
+**7. `foundPeer` can fire twice for one peer.** Peer-to-peer Wi-Fi surfaces a
 key-hash placeholder name first, then re-delivers with the real one. Equality
 is key-hash-only, so update your peer list in place — dedup-and-drop freezes
 the placeholder in your UI.

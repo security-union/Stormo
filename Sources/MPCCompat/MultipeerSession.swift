@@ -229,21 +229,6 @@ public final class MultipeerSession: @unchecked Sendable {
         _connectedPeers.removeAll()
         stateLock.unlock()
     }
-
-    // MARK: Background suspension (C-5 — no MCSession analog)
-
-    /// Call from `didEnterBackground`: peers keep this device `.connected`
-    /// for the grace period instead of dropping it ~5 s after the freeze.
-    /// Pair with ``resumeFromSuspension()``.
-    public func announceSuspension(gracePeriod: TimeInterval = 60) {
-        core?.announceSuspension(gracePeriod: gracePeriod)
-    }
-
-    /// Call from `didBecomeActive`: re-establish connections that died while
-    /// the app was frozen.
-    public func resumeFromSuspension() {
-        core?.resumeSession()
-    }
 }
 
 extension PeerID {
@@ -269,16 +254,4 @@ public protocol MultipeerSessionDelegate: AnyObject {
     func session(_ session: MultipeerSession, didReceive stream: InputStream, withName streamName: String, fromPeer peerID: PeerID)
     func session(_ session: MultipeerSession, didStartReceivingResourceWithName resourceName: String, fromPeer peerID: PeerID, with progress: Progress)
     func session(_ session: MultipeerSession, didFinishReceivingResourceWithName resourceName: String, fromPeer peerID: PeerID, at localURL: URL?, withError error: Error?)
-
-    /// Beyond-MC (C-5): the peer announced suspension (backgrounding). It
-    /// stays `.connected` through its grace window — either `peerDidResume`
-    /// follows, or `didChange .notConnected` on grace expiry. Default: no-op.
-    func session(_ session: MultipeerSession, peerDidSuspend peerID: PeerID)
-    /// Beyond-MC (C-5): a suspended peer reconnected within grace. Default: no-op.
-    func session(_ session: MultipeerSession, peerDidResume peerID: PeerID)
-}
-
-extension MultipeerSessionDelegate {
-    public func session(_ session: MultipeerSession, peerDidSuspend peerID: PeerID) {}
-    public func session(_ session: MultipeerSession, peerDidResume peerID: PeerID) {}
 }

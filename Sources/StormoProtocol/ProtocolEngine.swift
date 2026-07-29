@@ -36,11 +36,6 @@ public struct ProtocolEngine: Sendable {
         case respondToInvitation(from: PeerID, accept: Bool)
         case send(Data, to: Recipients, delivery: Delivery)
         case leave
-        /// Local app about to background (C-5): announce, and treat members'
-        /// connection losses as suspensions for `grace`, not departures.
-        case suspend(grace: TimeInterval)
-        /// Local app foregrounded: re-dial suspended members with dead links.
-        case resume
     }
 
     // MARK: Effects
@@ -61,10 +56,6 @@ public struct ProtocolEngine: Sendable {
 
     public enum TimerKey: Hashable, Sendable {
         case invitation(PeerID)
-        /// Grace window (C-5): expiry turns a suspended member into a departure.
-        case suspension(PeerID)
-        /// Fixed-rate resume re-dial tick; stops on reconnect or grace expiry.
-        case resumeRetry(PeerID)
     }
 
     public enum Event: Sendable, Equatable {
@@ -72,11 +63,6 @@ public struct ProtocolEngine: Sendable {
         case invitationFailed(PeerID, reason: InvitationFailure)
         case peerJoined(PeerID)
         case peerLeft(PeerID)
-        /// Member announced suspension (C-5): still a member; no `peerLeft`
-        /// until the grace window expires.
-        case peerSuspended(PeerID)
-        /// Suspended member reconnected within grace; membership never lapsed.
-        case peerResumed(PeerID)
         case messageReceived(Data, from: PeerID, delivery: Delivery)
         /// A member announced a resource transfer on the control stream (FR-17).
         /// The runtime matches the paired `transferChunk` stream by `id` and
@@ -97,19 +83,8 @@ public struct ProtocolEngine: Sendable {
 
     public struct Configuration: Sendable {
         public var invitationTimeout: TimeInterval
-        /// Ceiling on requested suspension grace — a remote must not park
-        /// itself as a zombie member forever.
-        public var maxSuspensionGrace: TimeInterval
-        /// Fixed interval between resume re-dials (no backoff by design —
-        /// the loop ends at reconnect or grace expiry).
-        public var resumeRetryInterval: TimeInterval
-
-        public init(invitationTimeout: TimeInterval = 30,
-                    maxSuspensionGrace: TimeInterval = 120,
-                    resumeRetryInterval: TimeInterval = 1) {
+        public init(invitationTimeout: TimeInterval = 30) {
             self.invitationTimeout = invitationTimeout
-            self.maxSuspensionGrace = maxSuspensionGrace
-            self.resumeRetryInterval = resumeRetryInterval
         }
     }
 
@@ -129,16 +104,6 @@ public struct ProtocolEngine: Sendable {
     // Zero-copy (DD-5/DD-6): retain the verified Signal (≤64 KB buffer) rather
     // than copying fields out of it.
     private var pendingIncoming: [PeerID: Signal] = [:]
-    // Members under a suspension grace window (C-5); cleared by reconnect or
-    // by the suspension timer turning them into departures.
-    private var suspended: Set<PeerID> = []
-    // The clamped grace announced by OUR `.suspend`, consumed by `.resume` to
-    // arm grace timers at wake — the frozen side never runs timers.
-    private var localSuspensionGrace: TimeInterval?
-    // Members that came back from a suspension grace hold. A fresh invite
-    // from one is a relaunched app (new session) rather than a duplicate;
-    // mesh-formation peers are never suspended, so they are never flagged.
-    private var reconnectedMembers: Set<PeerID> = []
 
     public init(localPeer: PeerID, configuration: Configuration = Configuration()) {
         self.localPeer = localPeer
@@ -161,18 +126,6 @@ public struct ProtocolEngine: Sendable {
 
         case .connectionEstablished(let peer):
             connections.insert(peer)
-            // A suspended member reconnecting within grace resumes silently.
-            if suspended.remove(peer) != nil {
-                // Held under grace and now back: this is either the SAME
-                // process resuming, or a relaunched one about to invite. The
-                // invite handler decides; mesh peers never reach here.
-                reconnectedMembers.insert(peer)
-                return [
-                    .cancelTimer(.suspension(peer)),
-                    .cancelTimer(.resumeRetry(peer)),
-                    .emit(.peerResumed(peer)),
-                ]
-            }
             // If we initiated for a pending invitation, send it now (FR-8: the
             // invite travels only over the secured connection). The invitation
             // timer was armed when the invite command was issued — it covers
@@ -185,16 +138,13 @@ public struct ProtocolEngine: Sendable {
 
         case .connectionClosed(let peer):
             connections.remove(peer)
-            reconnectedMembers.remove(peer)
             var effects: [Effect] = []
             if pendingOutgoing.removeValue(forKey: peer) != nil {
                 effects.append(.cancelTimer(.invitation(peer)))
                 effects.append(.emit(.invitationFailed(peer, reason: .connectionLost)))
             }
             pendingIncoming.removeValue(forKey: peer)
-            if suspended.contains(peer) {
-                // Expected loss: membership survives until grace expiry.
-            } else if members.remove(peer) != nil {
+            if members.remove(peer) != nil {
                 // FR-14: one peer's departure never disturbs the rest.
                 effects.append(.emit(.peerLeft(peer)))
             }
@@ -212,30 +162,6 @@ public struct ProtocolEngine: Sendable {
             return [
                 .emit(.invitationFailed(peer, reason: .timedOut)),
                 .closeConnection(peer),  // FR-9: half-open state cleanup
-            ]
-
-        case .timerFired(.suspension(let peer)):
-            // Grace expired → departure. Never while the connection is alive:
-            // a short background can end without the link dropping, and the
-            // observer side has no resume trigger, only this timer.
-            guard suspended.remove(peer) != nil else { return [] }
-            // Link alive: the peer never actually went away (or its Resume was
-            // lost). Report it back, never leave the app waiting.
-            if connections.contains(peer) { return [.emit(.peerResumed(peer))] }
-            guard members.remove(peer) != nil else { return [] }
-            return [
-                .cancelTimer(.resumeRetry(peer)),
-                .emit(.peerLeft(peer)),
-            ]
-
-        case .timerFired(.resumeRetry(let peer)):
-            // Fixed-rate re-dial while resuming; dies with the suspension.
-            guard suspended.contains(peer), members.contains(peer),
-                !connections.contains(peer)
-            else { return [] }
-            return [
-                .connect(to: peer),
-                .startTimer(.resumeRetry(peer), duration: configuration.resumeRetryInterval),
             ]
         }
     }
@@ -300,56 +226,9 @@ public struct ProtocolEngine: Sendable {
             connections.removeAll()
             pendingOutgoing.removeAll()
             pendingIncoming.removeAll()
-            suspended.removeAll()  // stale suspension timers no-op on fire
-            reconnectedMembers.removeAll()
-            localSuspensionGrace = nil
             return open
                 .sorted { $0.keyHash.lexicographicallyPrecedes($1.keyHash) }
                 .map { .closeConnection($0) }
-
-        case .suspend(let grace):
-            // Mark ALL members suspended and say goodbye — nothing else. The
-            // process is about to freeze, so NO timers arm here: the marks
-            // keep queued connection-closed inputs from evicting members, and
-            // `.resume` (the next time our code provably runs) starts the
-            // grace clock.
-            let duration = min(grace, configuration.maxSuspensionGrace)
-            localSuspensionGrace = duration
-            let signal = Signal.suspend(graceMs: UInt64(duration * 1000))
-            var effects: [Effect] = []
-            for member in members.sorted(by: { $0.keyHash.lexicographicallyPrecedes($1.keyHash) }) {
-                suspended.insert(member)
-                if connections.contains(member) {
-                    effects.append(.sendSignal(signal, to: member))
-                }
-            }
-            return effects
-
-        case .resume:
-            // Wake-up: re-dial suspended members with dead links at a fixed
-            // rate, bounded by a grace timer that starts NOW (grace runs from
-            // wake, not from the announce); live links just shed their marks.
-            let grace = localSuspensionGrace ?? configuration.maxSuspensionGrace
-            localSuspensionGrace = nil
-            var effects: [Effect] = []
-            let marked = members
-                .filter(suspended.contains)
-                .sorted { $0.keyHash.lexicographicallyPrecedes($1.keyHash) }
-            for member in marked {
-                if connections.contains(member) {
-                    // The link survived the freeze, so there is no reconnect
-                    // for the peer to observe — say so explicitly or it waits
-                    // forever.
-                    suspended.remove(member)
-                    effects.append(.sendSignal(.resume(), to: member))
-                } else {
-                    effects.append(.connect(to: member))
-                    effects.append(.startTimer(
-                        .resumeRetry(member), duration: configuration.resumeRetryInterval))
-                    effects.append(.startTimer(.suspension(member), duration: grace))
-                }
-            }
-            return effects
         }
     }
 
@@ -365,23 +244,11 @@ public struct ProtocolEngine: Sendable {
             // same PeerID). Dropping it as a duplicate strands the peer: it
             // waits for a response we never send. Report the old session's
             // death, then admit the newcomer normally.
-            var effects: [Effect] = []
-            if members.contains(peer) {
-                // Glare during mesh formation (both sides invite at once) is a
-                // duplicate — drop it. Only a member returning from a grace
-                // hold is introducing a genuinely new session.
-                guard reconnectedMembers.remove(peer) != nil else { return [] }
-                members.remove(peer)
-                suspended.remove(peer)
-                effects.append(.cancelTimer(.suspension(peer)))
-                effects.append(.cancelTimer(.resumeRetry(peer)))
-                effects.append(.emit(.peerLeft(peer)))
-            }
-            guard let inviter = invite.inviter?.peerID else { return effects }
+            guard !members.contains(peer) else { return [] }
+            guard let inviter = invite.inviter?.peerID else { return [] }
             pendingIncoming[peer] = signal  // retain the buffer, not a copy
             let context = invite.hasContext ? Data(invite.context) : nil  // app-ownership copy
-            effects.append(.emit(.invitationReceived(from: inviter, context: context)))
-            return effects
+            return [.emit(.invitationReceived(from: inviter, context: context))]
 
         case .inviteResponse(let response):
             guard pendingOutgoing.removeValue(forKey: peer) != nil else { return [] }
@@ -435,26 +302,6 @@ public struct ProtocolEngine: Sendable {
             guard members.contains(peer) else { return [] }
             guard let label = open.label else { return [] }
             return [.emit(.streamOpened(label: label, from: peer))]
-
-        case .suspend(let suspend):
-            // Membership-gate (DD-6); clamp the requested grace.
-            guard members.contains(peer) else { return [] }
-            let duration = min(
-                TimeInterval(suspend.graceMs) / 1000, configuration.maxSuspensionGrace)
-            suspended.insert(peer)
-            return [
-                .startTimer(.suspension(peer), duration: duration),
-                .emit(.peerSuspended(peer)),
-            ]
-
-        case .resume:
-            // Only meaningful for a member we are holding under grace.
-            guard members.contains(peer), suspended.remove(peer) != nil else { return [] }
-            return [
-                .cancelTimer(.suspension(peer)),
-                .cancelTimer(.resumeRetry(peer)),
-                .emit(.peerResumed(peer)),
-            ]
 
         case .unrecognized:
             // Forward compatibility (QA-11, DD-5 rule 1): ignore-and-log.
