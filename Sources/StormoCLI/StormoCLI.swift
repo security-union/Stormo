@@ -161,7 +161,7 @@ struct StormoCLI {
                     // Silent-death harness (e2e-cli.sh scenario 2): stay
                     // connected until SIGKILL'd, so the host must detect the
                     // loss via connection-level heartbeats alone (failure
-                    // mode 9: 5 s QUIC PINGs, 15 s idle timeout).
+                    // mode 9: 1 s QUIC PINGs, 5 s idle timeout — QUICTLS).
                     log("LINGERING — connected; kill -9 to simulate a crash")
                     try? await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000))
                     exit(2)  // watchdog fires first; lingering should end in SIGKILL
