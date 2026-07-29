@@ -52,6 +52,26 @@ final class CompatCore: @unchecked Sendable {
     weak var advertiser: NearbyServiceAdvertiser?
     weak var browser: NearbyServiceBrowser?
 
+    /// MC's lifecycle calls (`startAdvertisingPeer`, `stopBrowsingForPeers`, …)
+    /// are synchronous and implicitly ordered. The bridge into the async
+    /// `PeerSession` actor must preserve that order: unstructured `Task`s are
+    /// unordered and the actor is reentrant at await points, so back-to-back
+    /// `stop(); start()` (remote-shutter's scanning screen revisit) could
+    /// invert or overlap — stranding a live radio, or ending up with none.
+    /// Every lifecycle op therefore chains behind the previous one.
+    private let opLock = NSLock()
+    private var opTail: Task<Void, Never>?
+
+    private func enqueueOp(_ op: @escaping @Sendable () async -> Void) {
+        opLock.lock()
+        defer { opLock.unlock() }
+        let previous = opTail
+        opTail = Task {
+            await previous?.value
+            await op()
+        }
+    }
+
     init(peer: PeerID, serviceType: String, transport: (any PeerTransport)?) {
         self.peer = peer
         self.serviceType = serviceType
@@ -111,7 +131,7 @@ final class CompatCore: @unchecked Sendable {
     /// pattern work: the re-invite still knows how to reach the peer.
     func leaveSession() {
         guard let session = currentSession() else { return }
-        Task { await session.leave() }
+        enqueueOp { await session.leave() }
     }
 
     /// Full teardown: `PeerSession` destroyed, pumps stopped, radios released;
@@ -129,7 +149,7 @@ final class CompatCore: @unchecked Sendable {
         if let session {
             // Async by nature (PeerSession is an actor); `.leave` closes open
             // connections so the survivor observes `.notConnected`.
-            Task { await session.disconnect() }
+            enqueueOp { await session.disconnect() }
         }
     }
 
@@ -216,11 +236,18 @@ final class CompatCore: @unchecked Sendable {
 
     private func handleDiscovery(_ event: DiscoveryEvent) {
         // Record the endpoint before notifying, so a delegate that immediately
-        // calls invitePeer(_:) finds it.
+        // calls invitePeer(_:) finds it. For `.lost`, recover the peer we
+        // surfaced via `foundPeer` — MC hands the delegate the SAME MCPeerID
+        // both times, whereas the transport's `.lost` may carry the name-only
+        // placeholder from the AWDL find (PeerID equality is key-hash-only).
         lock.lock()
+        let departed: PeerID?
         switch event {
-        case .found(let peer), .updated(let peer): discovered[peer.id] = peer
-        case .lost(let id): discovered.removeValue(forKey: id)
+        case .found(let peer), .updated(let peer):
+            discovered[peer.id] = peer
+            departed = nil
+        case .lost(let id):
+            departed = discovered.removeValue(forKey: id)?.id ?? id
         }
         lock.unlock()
 
@@ -230,8 +257,10 @@ final class CompatCore: @unchecked Sendable {
             case .found(let peer), .updated(let peer):
                 let info = peer.metadata.isEmpty ? nil : peer.metadata
                 browser.delegate?.browser(browser, foundPeer: peer.id, withDiscoveryInfo: info)
-            case .lost(let id):
-                browser.delegate?.browser(browser, lostPeer: id)
+            case .lost:
+                if let departed {
+                    browser.delegate?.browser(browser, lostPeer: departed)
+                }
             }
         }
     }
@@ -240,7 +269,7 @@ final class CompatCore: @unchecked Sendable {
 
     func startAdvertising(metadata: [String: String]) {
         let session = liveSession()
-        Task { [weak self] in
+        enqueueOp { [weak self] in
             do {
                 try await session.startAdvertising(metadata: metadata)
             } catch {
@@ -251,12 +280,12 @@ final class CompatCore: @unchecked Sendable {
 
     func stopAdvertising() {
         guard let session = currentSession() else { return }
-        Task { await session.stopAdvertising() }
+        enqueueOp { await session.stopAdvertising() }
     }
 
     func startBrowsing() {
         let session = liveSession()
-        Task { [weak self] in
+        enqueueOp { [weak self] in
             do {
                 try await session.startBrowsing()
             } catch {
@@ -267,7 +296,7 @@ final class CompatCore: @unchecked Sendable {
 
     func stopBrowsing() {
         guard let session = currentSession() else { return }
-        Task { await session.stopBrowsing() }
+        enqueueOp { await session.stopBrowsing() }
     }
 
     func invite(peerID: PeerID, context: Data?, timeout: TimeInterval) {

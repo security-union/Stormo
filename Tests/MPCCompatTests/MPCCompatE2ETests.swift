@@ -296,6 +296,29 @@ struct MPCCompatE2ETests {
 
 #if os(macOS)
 extension MPCCompatE2ETests {
+    /// Bounded wait for the first stream element matching `predicate`.
+    /// Reconnect regressions hang forever (the awaited callback simply never
+    /// fires), so repro tests need a deadline that FAILS instead of wedging
+    /// the suite until the CI job cap.
+    private func first<T: Sendable>(
+        of stream: AsyncStream<T>,
+        within seconds: TimeInterval,
+        where predicate: @escaping @Sendable (T) -> Bool
+    ) async -> T? {
+        await withTaskGroup(of: T?.self) { group in
+            group.addTask {
+                for await element in stream where predicate(element) { return element }
+                return nil
+            }
+            group.addTask {
+                try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
+                return nil
+            }
+            let winner = await group.next() ?? nil
+            group.cancelAll()
+            return winner
+        }
+    }
     /// Remote-shutter's retry pattern over the PRODUCTION transport path
     /// (real QUIC + Bonjour, no injected transport): connect, disconnect
     /// (MCSession-style session rebuild), then RE-invite the same discovered
@@ -356,6 +379,118 @@ extension MPCCompatE2ETests {
         sessionB.disconnect()
         sessionA.disconnect()
         advertiser.stopAdvertisingPeer()
+        browser.stopBrowsingForPeers()
+    }
+
+    /// Remote-shutter's OTHER retry pattern — the one `reinviteAfterDisconnectOverQUIC`
+    /// deliberately does not cover: the monitor returns to the scanning screen and
+    /// restarts discovery on the SAME core objects (`stopBrowsingForPeers()` +
+    /// `startBrowsingForPeers()` back to back, `MultipeerService.startBrowsingOnly`).
+    /// Real MC re-fires `foundPeer` for every peer still advertising; the field
+    /// regression was that transport-lifetime browse dedup swallowed the re-find,
+    /// so the scanner stayed empty forever. The camera's advertiser deliberately
+    /// keeps running across the restart: a Bonjour record flap would evict the
+    /// peer from the dedup set by luck of timing and mask the bug.
+    @Test("Rescan after disconnect re-finds and reconnects (scanning-screen revisit)")
+    func rescanAfterDisconnectOverQUIC() async throws {
+        setenv("STORMO_NO_P2P", "1", 1)
+        let probe = PeerIdentity(name: "compat-rescan-probe")
+        guard QUICTransport.isTLSIdentityAvailable(for: probe) else {
+            print("[skip] no TLS identity in this environment"); return
+        }
+        let service = "_pmrescan\(UInt16.random(in: 1000...9999))._udp"
+        let peerA = PeerID(displayName: "RescanCam")
+        let peerB = PeerID(displayName: "RescanMon")
+
+        let sessionA = MultipeerSession(peer: peerA, service: service)
+        let recorderA = SessionRecorder()
+        sessionA.delegate = recorderA
+        let advDelegate = AutoAcceptAdvertiserRecorder(accepting: sessionA)
+        let advertiser = NearbyServiceAdvertiser(
+            peer: peerA, discoveryInfo: ["role": "camera"], serviceType: service)
+        advertiser.delegate = advDelegate
+        advertiser.startAdvertisingPeer()
+
+        let sessionB = MultipeerSession(peer: peerB, service: service)
+        let recorderB = SessionRecorder()
+        sessionB.delegate = recorderB
+        let browserDelegate = BrowserRecorder()
+        let browser = NearbyServiceBrowser(peer: peerB, serviceType: service)
+        browser.delegate = browserDelegate
+        browser.startBrowsingForPeers()
+
+        // Round 1: find, invite, connect. (Match by displayName: the local
+        // `peerA` handle does not share the advertiser's persisted key hash,
+        // and PeerID equality is key-hash-only.)
+        let round1 = await first(of: browserDelegate.found, within: 15) { $0.0.displayName == "RescanCam" }
+        let target = try #require(round1?.0, "round 1 must discover the camera")
+        browser.invitePeer(target, to: sessionB, withContext: nil, timeout: 25)
+        #expect(await firstState(recorderB, matching: .connected) != nil, "round 1 must connect")
+
+        // Disconnect: the camera observes the departure, both screens pop back
+        // to scanning.
+        sessionB.disconnect()
+        #expect(await firstState(recorderA, matching: .notConnected) != nil,
+                "camera must observe the departure")
+
+        // Scanning-screen revisit on the monitor, app-exact
+        // (MultipeerService.startBrowsingOnly). The camera keeps advertising.
+        browser.stopBrowsingForPeers()
+        browser.startBrowsingForPeers()
+
+        // Real-MC parity: the restarted browse must re-surface the still-
+        // advertising camera...
+        let refound = await first(of: browserDelegate.found, within: 15) { $0.0.displayName == "RescanCam" }
+        #expect(refound != nil, "restarted browse must re-find the advertising camera")
+
+        // ...and a fresh invite must connect (the full user-visible recovery).
+        browser.invitePeer(target, to: sessionB, withContext: nil, timeout: 25)
+        #expect(await firstState(recorderB, matching: .connected) != nil,
+                "round 2 must reconnect after the rescan")
+
+        sessionB.disconnect()
+        sessionA.disconnect()
+        advertiser.stopAdvertisingPeer()
+        browser.stopBrowsingForPeers()
+    }
+
+    /// A repeated `startAdvertisingPeer()` (no stop in between) must not leak
+    /// the previous NWListener. The regression: `startAdvertising` overwrote
+    /// the listener box without cancelling the old listener, so the orphaned
+    /// listener kept the Bonjour record registered after `stopAdvertisingPeer()`
+    /// — a ghost camera that browsers keep finding but that can never accept.
+    @Test("Double start then stop leaves no ghost advertiser")
+    func advertiserRestartLeavesNoGhostListener() async throws {
+        setenv("STORMO_NO_P2P", "1", 1)
+        let probe = PeerIdentity(name: "compat-ghost-probe")
+        guard QUICTransport.isTLSIdentityAvailable(for: probe) else {
+            print("[skip] no TLS identity in this environment"); return
+        }
+        let service = "_pmghost\(UInt16.random(in: 1000...9999))._udp"
+        let peerA = PeerID(displayName: "GhostCam")
+        let peerB = PeerID(displayName: "GhostMon")
+
+        let advertiser = NearbyServiceAdvertiser(
+            peer: peerA, discoveryInfo: nil, serviceType: service)
+        advertiser.startAdvertisingPeer()
+        advertiser.startAdvertisingPeer()
+
+        let browserDelegate = BrowserRecorder()
+        let browser = NearbyServiceBrowser(peer: peerB, serviceType: service)
+        browser.delegate = browserDelegate
+        browser.startBrowsingForPeers()
+
+        let found = await first(of: browserDelegate.found, within: 15) { $0.0.displayName == "GhostCam" }
+        let ghostID = try #require(found?.0, "advertiser must be discoverable before the stop")
+
+        // One stop must fully withdraw the record — the browser sees the peer
+        // go away (matched by identity: PeerID equality is key-hash-only, and
+        // MC parity means lostPeer carries the same peer foundPeer delivered).
+        // With a leaked first listener the record never disappears.
+        advertiser.stopAdvertisingPeer()
+        let lost = await first(of: browserDelegate.lost, within: 15) { $0 == ghostID }
+        #expect(lost != nil, "stopAdvertisingPeer must withdraw the Bonjour record")
+
         browser.stopBrowsingForPeers()
     }
 }
