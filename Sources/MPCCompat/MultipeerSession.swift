@@ -211,14 +211,12 @@ public final class MultipeerSession: @unchecked Sendable {
         throw StormoError.unimplemented("MultipeerSession.startStream")
     }
 
-    /// Drops this session's peer connections and membership, exactly like
-    /// `MCSession.disconnect()`. The session stays usable — reuse it.
+    /// `MCSession.disconnect()` semantics. The session stays usable — reuse it.
     ///
-    /// - Important: do NOT build a fresh session per connection attempt. This
-    ///   object is a facade over one long-lived peer session, so a "virgin
-    ///   session" resets no transport; the disconnect that comes with it
-    ///   closes every open connection, including one whose handshake just
-    ///   completed and carried the invitation being accepted.
+    /// - Important: never build a fresh session per connection attempt. This is
+    ///   a facade over one long-lived peer session, so a virgin session resets
+    ///   no transport and this disconnect closes live connections — including
+    ///   one carrying an invitation you are about to accept.
     public func disconnect() {
         // MCSession semantics: drop session connections/membership ONLY.
         // Advertiser/browser (independent objects in MPC) keep running, and

@@ -107,44 +107,28 @@ invitations — unchanged call sites.
   `PeerSession.openStream`.
 - No 8-peer cap; sessions support 32+ peers full-mesh.
 
-**6. Two MPC habits you must drop** — both are patterns that were correct
-against MPC and actively break here. If your app connects once and then never
+**6. Two MPC habits that break here.** If your app connects once and never
 again, look here first:
 
-- **Do NOT rebuild the session per connection attempt.** MPC apps commonly
-  create a virgin `MCSession` before each invite/accept, because Apple never
-  documented a torn-down `MCSession` as reusable and a reused one was the
-  classic cause of invites wedged in `.connecting`. Here `MultipeerSession` is
-  a *facade over one long-lived peer session*: rebuilding resets no transport,
-  and `disconnect()` closes every open connection — including the one that
-  just completed its handshake and delivered the invitation you are about to
-  accept. The symptom is distinctive: the first connection works, every later
-  one dies milliseconds after a successful handshake. Keep one session and
-  invite/accept on it.
-- **Do NOT restart a connection attempt that is still in flight.** A QUIC dial
-  (handshake + TLS + `PeerHello`) takes seconds, where MPC's invite felt
-  instantaneous. A fixed-rate reconnect loop that re-invites every second will
-  keep cancelling its own handshake and never connect. Retry on an attempt's
-  *failure*, not on a timer that ignores it.
+- **Reuse the session; never rebuild it per attempt.** `MultipeerSession` is a
+  facade over one long-lived peer session, so a "virgin session" resets no
+  transport — its `disconnect()` closes every open connection, including the
+  one that just delivered the invitation you're accepting.
+- **Never restart an attempt still in flight.** A QUIC dial takes seconds, not
+  milliseconds. Retry on failure, not on a timer.
 
-**7. Backgrounding is yours to handle now.** MPC's link was owned by system
-daemons and survived app suspension; a userspace QUIC connection cannot — the
-peer sees the connection die within ~5 s of the freeze. Call
+**7. Backgrounding is yours now.** MPC's link was daemon-owned and survived
+suspension; a userspace QUIC connection dies ~5 s into the freeze. Call
 `announceSuspension(gracePeriod:)` from `didEnterBackground` and
-`resumeFromSuspension()` from `didBecomeActive`: peers then hold membership
-across the freeze instead of reporting a departure, and reconnect silently.
-The beyond-MC `peerDidSuspend`/`peerDidResume` delegate callbacks let you show
-a "reconnecting" state; a peer under its grace window stays `.connected`, and
-grace expiry arrives as the ordinary `.notConnected`. See
-[DD-9](docs/design-mpc-successor.md) for the protocol.
+`resumeFromSuspension()` from `didBecomeActive` — peers then hold membership
+across it and reconnect silently. `peerDidSuspend`/`peerDidResume` drive your
+"reconnecting" UI; grace expiry arrives as the ordinary `.notConnected`
+([DD-9](docs/design-mpc-successor.md)).
 
-**8. `foundPeer` can fire more than once for the same peer.** Over
-peer-to-peer Wi-Fi a peer is first surfaced from a name-only Bonjour find whose
-`displayName` is a key-hash placeholder; when TXT resolution catches up the
-peer is re-delivered with its real name. `PeerID` equality is key-hash-only, so
-both deliveries compare equal — a peer list must **update the stored value in
-place**, never dedup-and-drop it, or the placeholder name is frozen in your UI
-forever. (`lostPeer` gives you back the same enriched `PeerID` you were shown.)
+**8. `foundPeer` can fire twice for one peer.** Peer-to-peer Wi-Fi surfaces a
+key-hash placeholder name first, then re-delivers with the real one. Equality
+is key-hash-only, so update your peer list in place — dedup-and-drop freezes
+the placeholder in your UI.
 
 ## Docs
 

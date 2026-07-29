@@ -23,13 +23,11 @@ import Stormo
 /// under ``lock``. Hence `@unchecked Sendable`.
 ///
 /// ### One session, reused — never rebuilt per attempt
-/// The session is reusable after `disconnect()`, and callers are expected to
-/// reuse it. Rebuilding a `MultipeerSession` per connection attempt (a common
-/// MPC habit) resets no transport here — it only routes to ``leaveSession()``,
-/// which closes every open connection, including one that just completed its
-/// handshake and delivered an invitation. ``teardown()`` is the deliberate
-/// full stop; the next action lazily rebuilds a `PeerSession` under the *same*
-/// identity via ``liveSession()``.
+/// Rebuilding a `MultipeerSession` per attempt (a common MPC habit) resets no
+/// transport: it routes to ``leaveSession()``, closing open connections —
+/// including one whose handshake just delivered an invitation. ``teardown()``
+/// is the deliberate full stop; ``liveSession()`` rebuilds lazily under the
+/// same identity.
 final class CompatCore: @unchecked Sendable {
 
     /// The app-facing `PeerID` this core was keyed on (registry identity).
