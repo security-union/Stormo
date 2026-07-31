@@ -11,6 +11,44 @@ import Security
 @Suite("Step 2 — Identity & TLS")
 struct IdentitySecurityTests {
 
+    // MARK: - Serial numbers
+
+    @Test("serial numbers are 20 random bytes and differ between certificates")
+    func serialNumberIsRandomAndSized() {
+        // `Certificate.SerialNumber` normalises to ASN.1 INTEGER form, which
+        // drops leading zero bytes — so 20 is the ceiling, not an invariant.
+        let serials = (0..<32).map { _ in IdentityCertificate.randomSerialNumber() }
+
+        for serial in serials {
+            #expect(!serial.bytes.isEmpty)
+            #expect(serial.bytes.count <= 20)
+        }
+
+        // 32 draws of ~20 random bytes colliding is impossible short of the
+        // generator being broken (which is what a miscompiled RNG path would
+        // look like).
+        let distinct = Set(serials.map { Array($0.bytes) })
+        #expect(distinct.count == serials.count)
+    }
+
+    @Test("certificate generation is reentrant across concurrent tasks")
+    func concurrentCertificateGeneration() async throws {
+        // Regression guard for the Thread Sanitizer SEGV: concurrent
+        // certificate construction used to abort the process outright on the
+        // iOS Simulator, and reported a Swift access race on macOS.
+        let identity = PeerIdentity(name: "Concurrent")
+        try await withThrowingTaskGroup(of: Int.self) { group in
+            for _ in 0..<8 {
+                group.addTask {
+                    try IdentityCertificate.makeCertificateDER(for: identity).count
+                }
+            }
+            for try await size in group {
+                #expect(size > 0)
+            }
+        }
+    }
+
     // MARK: - libp2p PeerID encoding (DD-8)
 
     @Test("keyHash is a 34-byte sha2-256 multihash (0x12 0x20 + digest)")

@@ -29,6 +29,31 @@ public enum IdentityCertificate {
     private static let hundredYears: TimeInterval = 100 * 365.25 * 24 * 60 * 60
     private static let oneDay: TimeInterval = 24 * 60 * 60
 
+    /// A random 20-byte serial number, generated without going through
+    /// `Certificate.SerialNumber()`.
+    ///
+    /// That convenience initialiser funnels into swift-certificates'
+    /// `@inlinable` generic `RandomNumberGenerator.bytes(count:)`. The
+    /// specialisation the compiler emits for it is **miscompiled under Thread
+    /// Sanitizer**: the instrumentation ends up treating a freshly generated
+    /// random value as a memory address, and the process takes a SEGV on that
+    /// garbage pointer inside `__tsan::MemoryAccess` (reported, misleadingly,
+    /// against `Certificate.SerialNumber.init`). It is a hard process abort on
+    /// the iOS Simulator, which made a TSan-enabled suite impossible to run in
+    /// a host app.
+    ///
+    /// Generating the bytes here and handing them to the explicit
+    /// `init(bytes:)` overload is semantically identical — 20 random bytes,
+    /// ASN.1-normalised by that initialiser — while staying out of the
+    /// miscompiled specialisation.
+    static func randomSerialNumber() -> Certificate.SerialNumber {
+        var bytes = [UInt8](repeating: 0, count: 20)
+        for index in bytes.indices {
+            bytes[index] = UInt8.random(in: UInt8.min...UInt8.max)
+        }
+        return Certificate.SerialNumber(bytes: bytes)
+    }
+
     /// Builds the self-signed `Certificate` for `identity`. Pure — no keychain,
     /// no I/O — so it is unit-testable without entitlements.
     public static func makeCertificate(for identity: PeerIdentity) throws -> Certificate {
@@ -39,7 +64,7 @@ public enum IdentityCertificate {
 
         return try Certificate(
             version: .v3,
-            serialNumber: Certificate.SerialNumber(),
+            serialNumber: Self.randomSerialNumber(),
             publicKey: Certificate.PublicKey(identity.key.publicKey),
             notValidBefore: Date(timeIntervalSinceNow: -oneDay),
             notValidAfter: Date(timeIntervalSinceNow: hundredYears),
