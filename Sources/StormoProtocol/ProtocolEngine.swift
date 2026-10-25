@@ -194,12 +194,14 @@ public struct ProtocolEngine: Sendable {
                     .closeConnection(peer),
                 ]
             }
-            members.insert(peer)
+            let freshlyAdmitted = members.insert(peer).inserted
             let roster = [localPeer] + members.sorted { $0.keyHash.lexicographicallyPrecedes($1.keyHash) }
             var effects: [Effect] = [
-                .sendSignal(.inviteResponse(accepted: true, roster: roster), to: peer),
-                .emit(.peerJoined(peer)),
+                .sendSignal(.inviteResponse(accepted: true, roster: roster), to: peer)
             ]
+            if freshlyAdmitted {
+                effects.append(.emit(.peerJoined(peer)))
+            }
             // Gossip the new member to the rest of the mesh (FR-13). Epoch is a
             // monotonic member count for now — sufficient for single-inviter
             // growth; concurrent-admission epoch reconciliation is future work.
@@ -239,16 +241,31 @@ public struct ProtocolEngine: Sendable {
         // fields persisted into engine state (`peerID`).
         switch signal.body {
         case .invite(let invite):
+            guard let inviter = invite.inviter?.peerID else { return [] }
+            var effects: [Effect] = []
+            // Invite glare: both sides invited simultaneously. The key-hash
+            // tie-break picks ONE handshake deterministically on both sides —
+            // the lex-smaller peer's invite survives. The smaller side ignores
+            // the crossed invite (the peer will answer ours); the larger side
+            // abandons its own silently (the membership that forms from
+            // accepting theirs resolves our invite's waiter via peerJoined).
+            if pendingOutgoing[peer] != nil {
+                if Self.shouldDial(from: localPeer, to: peer) { return [] }
+                pendingOutgoing.removeValue(forKey: peer)
+                effects.append(.cancelTimer(.invitation(peer)))
+            }
             // A fresh invite from a CURRENT member means its session is gone
             // (app relaunched — identity is persisted, so it returns as the
             // same PeerID). Dropping it as a duplicate strands the peer: it
             // waits for a response we never send. Report the old session's
             // death, then admit the newcomer normally.
-            guard !members.contains(peer) else { return [] }
-            guard let inviter = invite.inviter?.peerID else { return [] }
+            if members.remove(peer) != nil {
+                effects.append(.emit(.peerLeft(peer)))
+            }
             pendingIncoming[peer] = signal  // retain the buffer, not a copy
             let context = invite.hasContext ? Data(invite.context) : nil  // app-ownership copy
-            return [.emit(.invitationReceived(from: inviter, context: context))]
+            effects.append(.emit(.invitationReceived(from: inviter, context: context)))
+            return effects
 
         case .inviteResponse(let response):
             guard pendingOutgoing.removeValue(forKey: peer) != nil else { return [] }
@@ -258,18 +275,19 @@ public struct ProtocolEngine: Sendable {
                 effects.append(.closeConnection(peer))
                 return effects
             }
-            members.insert(peer)
-            effects.append(.emit(.peerJoined(peer)))
-            // Dial roster members we don't know yet, tie-break deciding
-            // direction (FR-12).
-            // TODO(mesh-join): these dials should carry a session-join handshake,
-            // not a fresh invitation (see also the .connect executor note).
+            if members.insert(peer).inserted {
+                effects.append(.emit(.peerJoined(peer)))
+            }
+            // Invite roster members we don't know yet, tie-break deciding
+            // direction (FR-12). A full invitation, not a bare dial: a bare
+            // `.connect` dead-ends half-open (nothing sends the invite after
+            // the transport comes up) and is never retried.
             for index in 0..<response.rosterCount {
                 guard let member = response.roster(at: index)?.peerID else { continue }
                 if member != localPeer, !members.contains(member),
                     Self.shouldDial(from: localPeer, to: member)
                 {
-                    effects.append(.connect(to: member))
+                    effects += handle(.invite(member, context: nil, timeout: nil))
                 }
             }
             return effects
@@ -282,7 +300,7 @@ public struct ProtocolEngine: Sendable {
                 if member != localPeer, !members.contains(member),
                     Self.shouldDial(from: localPeer, to: member)
                 {
-                    effects.append(.connect(to: member))
+                    effects += handle(.invite(member, context: nil, timeout: nil))
                 }
             }
             return effects
