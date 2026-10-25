@@ -130,6 +130,58 @@ struct ProtocolEngineTests {
         #expect(engine.members == [carol])
     }
 
+    @Test("Re-invite from a current member replaces the dead session (app relaunch)")
+    func reinviteFromCurrentMember() {
+        var engine = ProtocolEngine(localPeer: bob)
+        engine.admit(alice)
+        #expect(engine.members == [alice])
+
+        // Alice's app relaunches: same persisted PeerID, new connection, and a
+        // fresh invite. Dropping it as a duplicate would strand her — her old
+        // session is gone, so nobody would ever answer.
+        _ = engine.handle(.connectionEstablished(alice))
+        let effects = engine.handle(.signal(.invite(inviter: alice, context: nil), from: alice))
+        #expect(effects == [
+            .emit(.peerLeft(alice)),
+            .emit(.invitationReceived(from: alice, context: nil)),
+        ])
+        #expect(engine.members.isEmpty)
+
+        // Accepting readmits the reborn session.
+        let accepted = engine.handle(.command(.respondToInvitation(from: alice, accept: true)))
+        #expect(accepted.contains(.emit(.peerJoined(alice))))
+        #expect(engine.members == [alice])
+    }
+
+    @Test("Roster gossip invites unknown members — a full invitation, not a bare dial")
+    func rosterGossipCarriesInvitations() {
+        var engine = ProtocolEngine(localPeer: alice)  // alice: lex-smallest, so she dials
+        let carol = Self.makePeer("Carol", byte: 0x0C)
+        engine.admit(bob)
+
+        // Bob gossips that Carol joined. A bare `.connect` would dead-end
+        // half-open (nothing sends the invite once the transport comes up);
+        // the engine must run the whole invitation state machine.
+        let effects = engine.handle(
+            .signal(.rosterUpdate(members: [alice, bob, carol], epoch: 3), from: bob))
+        #expect(effects == [
+            .connect(to: carol),
+            .startTimer(.invitation(carol), duration: 30),
+        ])
+        let established = engine.handle(.connectionEstablished(carol))
+        #expect(established == [.sendSignal(.invite(inviter: alice, context: nil), to: carol)])
+    }
+
+    @Test("Roster gossip respects the dial tie-break — the higher hash waits")
+    func rosterGossipRespectsTieBreak() {
+        var engine = ProtocolEngine(localPeer: bob)  // bob > alice: he never dials her
+        let carol = Self.makePeer("Carol", byte: 0x0C)
+        engine.admit(carol)
+        let effects = engine.handle(
+            .signal(.rosterUpdate(members: [alice, bob, carol], epoch: 3), from: carol))
+        #expect(effects.isEmpty)
+    }
+
     @Test("Dial tie-break is deterministic and asymmetric (FR-12)")
     func dialTieBreak() {
         #expect(ProtocolEngine.shouldDial(from: alice, to: bob))

@@ -47,6 +47,15 @@ public actor PeerSession {
     // MARK: Runtime state (driver bookkeeping only — no protocol decisions)
 
     private var connections: [PeerID: any PeerConnection] = [:]
+    /// Monotonic per-peer connection generation. A peer can present a SECOND
+    /// connection while the first still exists (its app relaunched with the
+    /// same persisted identity, or an invite retry raced); the new connection
+    /// replaces the old, and events from the retired one — above all its
+    /// eventual close — must not be allowed to tear down its successor.
+    private var connectionGenerations: [PeerID: UInt64] = [:]
+    /// Who dialed the CURRENT connection per peer; decides the glare winner
+    /// when the two sides dial each other simultaneously.
+    private var connectionDirections: [PeerID: ConnectionDirection] = [:]
     private var receiveTasks: [PeerID: Task<Void, Never>] = [:]
     private var streamTasks: [PeerID: Task<Void, Never>] = [:]
     private var timers: [ProtocolEngine.TimerKey: Task<Void, Never>] = [:]
@@ -128,7 +137,7 @@ public actor PeerSession {
         let stream = transport.inboundConnections
         inboundTask = Task { [weak self] in
             for await connection in stream {
-                await self?.adopt(connection)
+                await self?.adopt(connection, direction: .inbound)
             }
         }
     }
@@ -164,6 +173,12 @@ public actor PeerSession {
         timeout: TimeInterval = 30
     ) async throws -> SessionPeer {
         knownEndpoints[peer.id] = peer
+        // Already a member: the invite is idempotent. Without this, the engine
+        // no-ops the command — no timer, no failure — and the continuation
+        // below would wait forever.
+        if engine.members.contains(peer.id) {
+            return SessionPeer(id: peer.id)
+        }
         return try await withCheckedThrowingContinuation { continuation in
             guard inviteWaiters[peer.id] == nil else {
                 continuation.resume(throwing: StormoError.invitationAlreadyPending(peer.id))
@@ -298,7 +313,7 @@ public actor PeerSession {
                 do {
                     let connection = try await transport.connect(
                         to: endpoint, identity: identity, trust: trust)
-                    self.adopt(connection)
+                    self.adopt(connection, direction: .outbound)
                 } catch {
                     self.run(.connectionClosed(peerID))
                 }
@@ -500,13 +515,48 @@ public actor PeerSession {
 
     // MARK: - Inputs from the world
 
-    private func adopt(_ connection: any PeerConnection) {
+    private enum ConnectionDirection {
+        case outbound  // we dialed
+        case inbound  // the peer dialed
+    }
+
+    private func adopt(_ connection: any PeerConnection, direction: ConnectionDirection) {
         let peer = connection.remotePeer
+        // A peer can present a SECOND connection: its app relaunched with the
+        // same persisted identity (same direction), or the two sides dialed
+        // each other simultaneously (opposite directions — glare).
+        if connections[peer] != nil, let oldDirection = connectionDirections[peer] {
+            let winner: ConnectionDirection
+            if oldDirection == direction {
+                // Same direction: the newer supersedes the old session.
+                winner = direction
+            } else {
+                // Glare: both sides keep the connection dialed by the
+                // LEX-SMALLER peer — a rule each side computes identically
+                // from the key hashes, so they converge on one pipe.
+                winner = identity.id.keyHash.lexicographicallyPrecedes(peer.keyHash)
+                    ? .outbound : .inbound
+            }
+            guard winner == direction else {
+                // The newcomer loses: ignore it silently. Close only a dial
+                // of our own; an inbound loser is the peer's to close, so our
+                // close can never surface as a membership event over there.
+                if direction == .outbound { Task { await connection.close() } }
+                return
+            }
+            // The old connection loses: retire it SILENTLY — cancel its tasks,
+            // no `.connectionClosed`, which would tear down the membership the
+            // new connection now carries. Same closing rule as above.
+            retireConnection(peer, closing: oldDirection == .outbound || oldDirection == direction)
+        }
+        connectionDirections[peer] = direction
         connections[peer] = connection
+        let generation = (connectionGenerations[peer] ?? 0) + 1
+        connectionGenerations[peer] = generation
         let events = connection.events
         receiveTasks[peer] = Task { [weak self] in
             for await event in events {
-                await self?.handleConnectionEvent(event, from: peer)
+                await self?.handleConnectionEvent(event, from: peer, generation: generation)
             }
         }
         let streams = connection.incomingStreams
@@ -518,7 +568,29 @@ public actor PeerSession {
         run(.connectionEstablished(peer))
     }
 
-    private func handleConnectionEvent(_ event: PeerConnectionEvent, from peer: PeerID) {
+    /// Retires the current connection to `peer` SILENTLY: its tasks stop and
+    /// its runtime state drops with no `.connectionClosed`, because a retired
+    /// connection was replaced, not lost. `closing` actually closes the pipe;
+    /// a glare loser we did not initiate is left for its initiator to close.
+    private func retireConnection(_ peer: PeerID, closing: Bool) {
+        receiveTasks.removeValue(forKey: peer)?.cancel()
+        streamTasks.removeValue(forKey: peer)?.cancel()
+        let old = connections.removeValue(forKey: peer)
+        if closing, let old {
+            Task { await old.close() }
+        }
+        // Per-peer stream state belonged to the retired connection; the next
+        // one numbers its ordered messages from zero on both sides.
+        outboundSequence.removeValue(forKey: peer)
+        expectedInboundSequence.removeValue(forKey: peer)
+        reorderBuffer.removeValue(forKey: peer)
+    }
+
+    private func handleConnectionEvent(
+        _ event: PeerConnectionEvent, from peer: PeerID, generation: UInt64
+    ) {
+        // An event that raced the retirement of its connection: drop it.
+        guard connectionGenerations[peer] == generation else { return }
         switch event {
         case .signal(let bytes):
             do {
@@ -586,6 +658,10 @@ public actor PeerSession {
 
     /// Drops all per-peer runtime bookkeeping for a closed connection.
     private func forgetConnection(_ peer: PeerID) {
+        // Invalidate the generation: any event still in flight from this
+        // connection is stale from here on.
+        connectionGenerations[peer] = (connectionGenerations[peer] ?? 0) + 1
+        connectionDirections.removeValue(forKey: peer)
         connections.removeValue(forKey: peer)
         receiveTasks.removeValue(forKey: peer)?.cancel()
         streamTasks.removeValue(forKey: peer)?.cancel()
